@@ -132,6 +132,8 @@ export async function uploadImageToR2(
     const r2Url = r2.publicDomain
       ? `${r2.publicDomain.replace(/\/+$/, '')}/${uniqueKey}`
       : `https://${r2.bucket}.r2.cloudflarestorage.com/${uniqueKey}`;
+    
+    console.log('[R2 UPLOAD SUCCESS]', { r2Url, uniqueKey });
 
     return {
       success: true,
@@ -139,6 +141,7 @@ export async function uploadImageToR2(
       key: uniqueKey,
     };
   } catch (err: any) {
+    console.error('[R2 UPLOAD ERROR]', err);
     return {
       success: false,
       error: err.message || 'Error executing Cloudflare R2 upload.',
