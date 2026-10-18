@@ -103,7 +103,7 @@ export interface Group {
   metadataFetchError?: string | null;
 }
 
-export * from './types/user';
+
 
 export type AdSlot = 'header_top' | 'feed_native' | 'sidebar' | 'detail_banner' | 'rules_banner' | 'footer_banner' | 'footer' | 'join_button_ad' | 'above_join_button';
 export type AdTargeting = 'all' | 'everywhere' | 'adult_only' | 'safe_only';
@@ -235,5 +235,5 @@ export interface ManualPromotionRequest {
   notes?: string;
 }
 
-export * from './types/user';
+
 
