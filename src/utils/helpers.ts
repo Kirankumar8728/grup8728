@@ -1543,7 +1543,8 @@ export function getGroupUrlPath(group: {
   description?: string;
 }): string {
   const prefix = getGroupRoutePrefix(group);
-  const identifier = group.slug || group.id;
+  const titleSlug = (group.title && !isGenericGroupTitle(group.title)) ? generateSlug(group.title) : '';
+  const identifier = titleSlug || group.slug || group.id;
   return `/${prefix}/${identifier}`;
 }
 

@@ -117,6 +117,13 @@ function rebuildGroupsLookupIndex(db: Group[]) {
       groupsLookupIndex.set(g.slug, g);
       groupsLookupIndex.set(g.slug.toLowerCase(), g);
     }
+    if (g.title) {
+      const tSlug = generateSlug(g.title);
+      if (tSlug) {
+        groupsLookupIndex.set(tSlug, g);
+        groupsLookupIndex.set(tSlug.toLowerCase(), g);
+      }
+    }
   }
 }
 // Global in-memory groups database initialized with seeds, sorted newest first
@@ -420,6 +427,16 @@ export function persistCurrentGroups(_immediate = false): void {
 }
 
 export function getGroupsDatabase(): Group[] {
+  try {
+    if (fs.existsSync(JSON_PATH)) {
+      const stat = fs.statSync(JSON_PATH);
+      if (!globalForGroups.nexusGroupsLastMtime || stat.mtimeMs > globalForGroups.nexusGroupsLastMtime) {
+        globalForGroups.nexusGroupsLastMtime = stat.mtimeMs;
+        syncDatabaseFromSeeds();
+      }
+    }
+  } catch {}
+
   if (!globalForGroups.nexusGroupsDatabase || globalForGroups.nexusGroupsDatabase.length === 0) {
     syncDatabaseFromSeeds();
   }
@@ -465,7 +482,10 @@ function sanitizeRestoredGroup(g: any, idx: number = 0): Group {
   const rawUrl = typeof g.url === 'string' ? g.url.trim() : '';
   const detected = detectPlatformFromUrl(rawUrl);
   const plat: Platform = (detected !== 'other') ? detected : (g.platform || 'whatsapp');
-  const slug = (typeof g.slug === 'string' && g.slug.trim()) ? g.slug.trim() : generateSlug(g.title || 'community');
+  const titleSlug = (typeof g.title === 'string' && g.title.trim() && !isGenericGroupTitle(g.title))
+    ? generateSlug(g.title.trim())
+    : '';
+  const slug = titleSlug || (typeof g.slug === 'string' && g.slug.trim() ? g.slug.trim() : generateSlug(g.id || 'community'));
   const cleanUrl = rawUrl.length > 0 ? rawUrl : ensureUrlMatchesPlatform('', plat, slug || g.id || idx);
 
   // Restore comments array completely with author information, masked emails, and text
@@ -1290,7 +1310,7 @@ export async function updateGroup(id: string, updates: Partial<Group>): Promise<
     platform: finalPlatform,
     url: finalUrl,
     id: existing.id,
-    slug: existing.slug,
+    slug: (finalTitle && !isGenericGroupTitle(finalTitle)) ? generateSlug(finalTitle) : existing.slug,
     updatedAt: new Date().toISOString(),
   };
 

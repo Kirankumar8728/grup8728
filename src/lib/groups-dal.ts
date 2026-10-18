@@ -747,9 +747,8 @@ export async function createGroup(group: Partial<Group>): Promise<Group> {
 
   const pool = getPool();
   const id = group.id || `grp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-  const titleSlug = group.title ? generateSlug(group.title) : '';
-  const isPassedSlugGenericOrHash = !group.slug || /^[+]?[a-zA-Z0-9_-]{10,}$/.test(group.slug) || isGenericGroupTitle(group.slug);
-  let slug = (titleSlug && isPassedSlugGenericOrHash) ? titleSlug : (group.slug || titleSlug || id);
+  const titleSlug = (group.title && !isGenericGroupTitle(group.title)) ? generateSlug(group.title) : '';
+  let slug = titleSlug || group.slug || generateSlug(group.title || id);
   group.id = id;
   group.slug = slug;
   const nowIso = new Date().toISOString();
@@ -848,7 +847,8 @@ export async function batchUpsertGroups(groups: Partial<Group>[]): Promise<{ suc
         for (const g of chunk) {
           placeholders.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
           const id = g.id || `grp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-          const slug = g.slug || generateSlug(g.title || id);
+          const titleSlug = (g.title && !isGenericGroupTitle(g.title)) ? generateSlug(g.title) : '';
+          const slug = titleSlug || g.slug || generateSlug(g.title || id);
           const nowIso = new Date().toISOString();
           values.push(
             id,
