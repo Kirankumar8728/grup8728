@@ -127,24 +127,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://cdn.discordapp.com" />
-        <link rel="dns-prefetch" href="https://cdn.discordapp.com" />
         <link rel="llms-txt" href="/llms.txt" />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.addEventListener('error', function(e) {
-                if (e && e.message && (e.message.indexOf('ChunkLoadError') !== -1 || e.message.indexOf('Loading chunk') !== -1)) {
-                  var lastReload = sessionStorage.getItem('gl_chunk_retry');
-                  var now = Date.now();
-                  if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
-                    sessionStorage.setItem('gl_chunk_retry', String(now));
-                    window.location.reload();
-                  }
-                }
-              });
-            `,
-          }}
-        />
       </head>
       <body suppressHydrationWarning className="min-h-screen bg-slate-950 text-slate-100 antialiased font-sans flex flex-col selection:bg-emerald-500 selection:text-white">
         <script
@@ -155,25 +138,6 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(orgSchema) }}
         />
-        {gaId && (
-          <>
-            <script
-              async
-              src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`}
-            />
-            <script
-              id="google-analytics-init"
-              dangerouslySetInnerHTML={{
-                __html: `
-                  window.dataLayer = window.dataLayer || [];
-                  function gtag(){dataLayer.push(arguments);}
-                  gtag('js', new Date());
-                  gtag('config', '${gaId.replace(/'/g, "\\'")}', { page_path: window.location.pathname });
-                `,
-              }}
-            />
-          </>
-        )}
         <AppProviders>
           {children}
         </AppProviders>

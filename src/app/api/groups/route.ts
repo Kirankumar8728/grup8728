@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Real-Time Health & Expiration Check during submission
-    const { checkGroupLinkHealth } = require('@/src/lib/link-health');
+    const { checkGroupLinkHealth } = await import('@/src/lib/link-health');
     const healthCheck = await checkGroupLinkHealth({
       id: 'submission_temp',
       url: normalizedUrl,
@@ -280,7 +280,7 @@ export async function POST(req: NextRequest) {
       targetGroup = await getGroupBySlug(handleSlug) || await getGroupBySlug(norm.platformHandle);
     }
     if (!targetGroup) {
-      const { getGroupsDatabase } = require('@/src/lib/groups-store');
+      const { getGroupsDatabase } = await import('@/src/lib/groups-store');
       const storeDb = getGroupsDatabase();
       const dup = checkDuplicateCommunity({
         url: normalizedUrl,
@@ -463,7 +463,7 @@ export async function POST(req: NextRequest) {
 
     // If the user is logged in, instantly set them as the owner & verified claimant of the newly submitted group!
     if (auth.isAuthenticated && auth.userId && newGroup.id) {
-      const { getPool } = require('@/src/lib/db');
+      const { getPool } = await import('@/src/lib/db');
       const pool = getPool();
       if (pool) {
         try {
@@ -478,7 +478,7 @@ export async function POST(req: NextRequest) {
 
       // Sync local in-memory store
       try {
-        const { getGroupsDatabase } = require('@/src/lib/groups-store');
+        const { getGroupsDatabase } = await import('@/src/lib/groups-store');
         const db = getGroupsDatabase();
         const found = db.find((item: any) => item.id === newGroup.id);
         if (found) {

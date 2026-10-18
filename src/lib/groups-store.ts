@@ -45,6 +45,7 @@ import {
   saveKeywordsToDisk,
   loadGroupsFromDisk,
   saveGroupsToDisk,
+  getGroupsDiskMtime,
   clearPersistenceCache
 } from './groups-persistence';
 import {
@@ -428,14 +429,16 @@ export function persistCurrentGroups(_immediate = false): void {
 
 export function getGroupsDatabase(): Group[] {
   try {
-    if (fs.existsSync(JSON_PATH)) {
-      const stat = fs.statSync(JSON_PATH);
-      if (!globalForGroups.nexusGroupsLastMtime || stat.mtimeMs > globalForGroups.nexusGroupsLastMtime) {
-        globalForGroups.nexusGroupsLastMtime = stat.mtimeMs;
+    const diskMtime = getGroupsDiskMtime();
+    if (diskMtime > 0) {
+      if (!globalForGroups.nexusGroupsLastMtime || diskMtime > globalForGroups.nexusGroupsLastMtime) {
+        globalForGroups.nexusGroupsLastMtime = diskMtime;
         syncDatabaseFromSeeds();
       }
     }
-  } catch {}
+  } catch (err) {
+    // Ignore error
+  }
 
   if (!globalForGroups.nexusGroupsDatabase || globalForGroups.nexusGroupsDatabase.length === 0) {
     syncDatabaseFromSeeds();
