@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid payload' }, { status: 400 });
     }
 
-    const updated = incrementStat(groupId, action);
+    const updated = await incrementStat(groupId, action);
     return NextResponse.json({ success: true, stats: updated }, {
       headers: {
         'Cache-Control': 'private, no-store, max-age=0',

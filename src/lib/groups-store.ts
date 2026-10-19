@@ -285,7 +285,7 @@ export async function resetAllGroupMetricsToZero(options: {
       if (setClauses.length > 0) {
         const [res]: any = await pool.query(`
           UPDATE groups_dir 
-          SET ${setClauses.join(', ')}, bookmarks = 0, rating = 0, ratingCount = 0, comments = '[]'
+          SET ${setClauses.join(', ')}, bookmarks = 0, comments = '[]'
         `);
         await pool.query('TRUNCATE TABLE group_actions').catch(() => {});
         updatedCount = res?.affectedRows || 0;

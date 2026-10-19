@@ -1,58 +1,37 @@
-import path from 'path';
-import fs from 'fs';
+import { getPool } from '@/src/lib/db';
 
-let db: any = null;
-
-try {
-  // Use node:sqlite if available in Node 22+ via require
-  const sqlite = require('node:sqlite');
-  if (sqlite && sqlite.DatabaseSync) {
-    const dataDir = path.join(process.cwd(), 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-
-    const dbPath = path.join(dataDir, 'stats.db');
-    db = new sqlite.DatabaseSync(dbPath);
-
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS group_stats (
-        group_id TEXT PRIMARY KEY,
-        upvotes INTEGER DEFAULT 0,
-        shares INTEGER DEFAULT 0,
-        clicks INTEGER DEFAULT 0
-      );
-    `);
-  }
-} catch (err) {
-  console.warn('[stats-db] SQLite initialization note:', err);
-}
-
-// In-memory fallback if SQLite fails or is unavailable
+// In-memory fallback if MySQL is disconnected or pending
 const memoryStats = new Map<string, { upvotes: number; shares: number; clicks: number }>();
 
-export function getStatsBatch(ids: string[]): Record<string, { upvotes: number; shares: number; clicks: number }> {
+export async function getStatsBatch(ids: string[]): Promise<Record<string, { upvotes: number; shares: number; clicks: number }>> {
   if (!ids || ids.length === 0) return {};
   const map: Record<string, { upvotes: number; shares: number; clicks: number }> = {};
   for (const id of ids) {
     map[id] = { upvotes: 0, shares: 0, clicks: 0 };
   }
 
-  if (db) {
+  const pool = getPool();
+  if (pool) {
     try {
       const placeholders = ids.map(() => '?').join(',');
-      const stmt = db.prepare(`SELECT group_id, upvotes, shares, clicks FROM group_stats WHERE group_id IN (${placeholders})`);
-      const rows = stmt.all(...ids) as any[];
-      for (const row of rows) {
-        map[row.group_id] = {
-          upvotes: row.upvotes || 0,
-          shares: row.shares || 0,
-          clicks: row.clicks || 0,
-        };
+      const [rows]: any = await pool.query(
+        `SELECT id, slug, upvotes, shares, clicks FROM groups_dir WHERE id IN (${placeholders}) OR slug IN (${placeholders})`,
+        [...ids, ...ids]
+      );
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          const stats = {
+            upvotes: Number(row.upvotes) || 0,
+            shares: Number(row.shares) || 0,
+            clicks: Number(row.clicks) || 0,
+          };
+          if (row.id) map[row.id] = stats;
+          if (row.slug) map[row.slug] = stats;
+        }
+        return map;
       }
-      return map;
-    } catch (err) {
-      console.error('[stats-db] getStatsBatch error:', err);
+    } catch (err: any) {
+      console.warn('[stats-db] getStatsBatch MySQL notice:', err?.message);
     }
   }
 
@@ -66,29 +45,40 @@ export function getStatsBatch(ids: string[]): Record<string, { upvotes: number; 
   return map;
 }
 
-export function incrementStat(groupId: string, action: 'upvote' | 'share' | 'join' | 'click') {
+export async function incrementStat(groupId: string, action: 'upvote' | 'share' | 'join' | 'click') {
   const col = action === 'upvote' ? 'upvotes' : action === 'share' ? 'shares' : 'clicks';
-  
-  if (db) {
-    try {
-      const cleanId = (groupId || '').replace(/'/g, "''");
-      db.exec(`
-        INSERT INTO group_stats (group_id, ${col}) VALUES ('${cleanId}', 1)
-        ON CONFLICT(group_id) DO UPDATE SET ${col} = ${col} + 1;
-      `);
-      const stmt = db.prepare(`SELECT group_id, upvotes, shares, clicks FROM group_stats WHERE group_id = ?`);
-      return stmt.get(groupId) || { group_id: groupId, upvotes: 0, shares: 0, clicks: 0 };
-    } catch (err) {
-      console.error('[stats-db] incrementStat error:', err);
-    }
-  }
 
-  // Memory fallback
+  // Update in-memory fallback
   const current = memoryStats.get(groupId) || { upvotes: 0, shares: 0, clicks: 0 };
   if (action === 'upvote') current.upvotes += 1;
   else if (action === 'share') current.shares += 1;
   else current.clicks += 1;
   memoryStats.set(groupId, current);
 
+  const pool = getPool();
+  if (pool) {
+    try {
+      await pool.query(
+        `UPDATE groups_dir SET ${col} = ${col} + 1 WHERE id = ? OR slug = ?`,
+        [groupId, groupId]
+      );
+      const [rows]: any = await pool.query(
+        `SELECT id, upvotes, shares, clicks FROM groups_dir WHERE id = ? OR slug = ? LIMIT 1`,
+        [groupId, groupId]
+      );
+      if (Array.isArray(rows) && rows.length > 0) {
+        return {
+          group_id: groupId,
+          upvotes: Number(rows[0].upvotes) || current.upvotes,
+          shares: Number(rows[0].shares) || current.shares,
+          clicks: Number(rows[0].clicks) || current.clicks,
+        };
+      }
+    } catch (err: any) {
+      console.warn('[stats-db] incrementStat MySQL notice:', err?.message);
+    }
+  }
+
   return { group_id: groupId, ...current };
 }
+

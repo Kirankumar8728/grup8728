@@ -74,7 +74,7 @@ export async function executeWithTimeout<T>(
 const GROUP_CARD_COLUMNS = `
   id, slug, title, description, url, platform, category, language, region,
   customTags, imageUrl, bannerUrl, memberCount, growthRate, clicks, upvotes,
-  bookmarks, rating, ratingCount, verified, featured, isNsfw, isSticky,
+  bookmarks, verified, featured, isNsfw, isSticky,
   stickyUntil, stickyOrder, isPromoted, safetyScore, rankScore, dailyRankScore,
   createdAt, publishedAt, updatedAt, authorName, authorEmail, claimedByUserId,
   owner_id, isClaimed, status, isActive

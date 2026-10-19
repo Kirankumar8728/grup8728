@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
     const idsParam = searchParams.get('ids') || '';
     const ids = idsParam.split(',').filter(Boolean);
 
-    const statsMap = getStatsBatch(ids);
+    const statsMap = await getStatsBatch(ids);
 
     return NextResponse.json({ success: true, stats: statsMap }, {
       headers: {
