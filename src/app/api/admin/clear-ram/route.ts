@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearGroupsFromRam } from '@/src/lib/groups-store';
 import { requireAdmin } from '@/src/lib/admin-auth';
-import { checkRateLimit, rateLimitResponse } from '@/src/lib/rate-limit';
+import { checkRateLimit, rateLimitResponse, clearRateLimits } from '@/src/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,10 +39,13 @@ export async function POST(req: NextRequest) {
     }
 
     const result = clearGroupsFromRam();
+    const rateLimitClear = clearRateLimits();
+
     return NextResponse.json({
       success: true,
-      message: `Successfully purged ${result.freedCount} groups from RAM memory.`,
+      message: `Successfully purged ${result.freedCount} groups from RAM memory and reset ${rateLimitClear.cleared} rate-limit keys.`,
       freedCount: result.freedCount,
+      clearedRateLimits: rateLimitClear.cleared,
       memory: result.memory,
       timestamp: new Date().toISOString(),
     });
