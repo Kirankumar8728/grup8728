@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export interface GroupStatItem {
   upvotes: number;
@@ -10,30 +10,44 @@ export interface GroupStatItem {
 
 export function useLiveStats(groupIds: string[]) {
   const [statsMap, setStatsMap] = useState<Record<string, GroupStatItem>>({});
+  const lastFetchedKeyRef = useRef<string>('');
 
-  const fetchStats = useCallback(async (ids: string[]) => {
-    if (!ids || ids.length === 0) return;
+  const groupIdsKey = Array.isArray(groupIds) ? groupIds.slice(0, 50).sort().join(',') : '';
+
+  const fetchStats = useCallback(async (key: string) => {
+    if (!key) return;
+    const ids = key.split(',').filter(Boolean);
+    if (ids.length === 0) return;
+
     try {
       const res = await fetch(`/api/stats/batch?ids=${encodeURIComponent(ids.join(','))}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.stats) {
           setStatsMap(prev => ({ ...prev, ...data.stats }));
+          lastFetchedKeyRef.current = key;
         }
       }
     } catch {}
   }, []);
 
   useEffect(() => {
-    if (!groupIds || groupIds.length === 0) return;
-    fetchStats(groupIds);
+    if (!groupIdsKey) return;
 
+    // Fetch immediately if group list changed
+    if (groupIdsKey !== lastFetchedKeyRef.current) {
+      fetchStats(groupIdsKey);
+    }
+
+    // 60-second background refresh only when tab is visible
     const timer = setInterval(() => {
-      fetchStats(groupIds);
-    }, 10000);
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchStats(groupIdsKey);
+      }
+    }, 60000);
 
     return () => clearInterval(timer);
-  }, [groupIds, fetchStats]);
+  }, [groupIdsKey, fetchStats]);
 
   const optimisticallyIncrement = useCallback((groupId: string, action: 'upvote' | 'share' | 'join' | 'click') => {
     setStatsMap(prev => {
@@ -45,7 +59,7 @@ export function useLiveStats(groupIds: string[]) {
       return { ...prev, [groupId]: updated };
     });
 
-    // Fire non-blocking background fetch
+    // Non-blocking background sync
     fetch('/api/stats/increment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -53,5 +67,6 @@ export function useLiveStats(groupIds: string[]) {
     }).catch(() => {});
   }, []);
 
-  return { statsMap, optimisticallyIncrement, refetch: () => fetchStats(groupIds) };
+  return { statsMap, optimisticallyIncrement, refetch: () => fetchStats(groupIdsKey) };
 }
+

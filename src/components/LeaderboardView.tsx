@@ -79,9 +79,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
     setLeaderboardGroups(initialGroups);
   }, [initialGroups]);
 
-  // 1-minute real-time auto-refresh
+  // 3-minute background refresh (only when tab is visible)
   useEffect(() => {
     const fetchFreshData = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
         setIsRefreshing(true);
         const res = await fetch('/api/groups?limit=1000');
@@ -99,7 +100,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
       }
     };
 
-    const intervalId = setInterval(fetchFreshData, 60000);
+    const intervalId = setInterval(fetchFreshData, 180000);
     return () => clearInterval(intervalId);
   }, []);
 
