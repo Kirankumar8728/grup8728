@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { Group } from '../types.ts';
+import type { Group } from '../types';
 
 // Use /tmp on Vercel or serverless environments where process.cwd() is read-only (EROFS)
 const isServerless = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';

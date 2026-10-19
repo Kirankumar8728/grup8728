@@ -1,6 +1,6 @@
-import { loadGroupsFromDisk } from './lib/groups-persistence.ts';
-import { executeDml } from './lib/db.ts';
-import { uploadImageToR2 } from './lib/r2-storage.ts';
+import { loadGroupsFromDisk } from './lib/groups-persistence';
+import { executeDml } from './lib/db';
+import { uploadImageToR2 } from './lib/r2-storage';
 
 async function migrateImagesToCDN() {
   console.log('[MIGRATION] Starting image migration to CDN (Minimal)...');
