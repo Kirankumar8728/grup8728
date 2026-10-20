@@ -17,12 +17,10 @@ import {
   Globe, 
   Languages, 
   Lock,
-  ChevronLeft,
-  Smartphone,
-  AlertCircle
+  ChevronLeft
 } from 'lucide-react';
 import { Group } from '../types';
-import { PLATFORM_CONFIGS, formatMemberCount, getJoinButtonLabel, isAdultGroup, getPlatformJoinButtonClasses, optimizeImageUrl, getNativeAppUrl } from '../utils/helpers';
+import { PLATFORM_CONFIGS, formatMemberCount, getJoinButtonLabel, isAdultGroup, getPlatformJoinButtonClasses, optimizeImageUrl } from '../utils/helpers';
 import { PlatformIcon } from './PlatformIcon';
 import { AdDisplay } from './AdDisplay';
 import { fireConfetti } from '../utils/confetti';
@@ -56,7 +54,6 @@ export const GroupJoinFlowPage: React.FC<GroupJoinFlowPageProps> = ({
 
   const platformConfig = PLATFORM_CONFIGS[group.platform] || PLATFORM_CONFIGS.other;
   const isAdult = isAdultGroup(group);
-  const nativeAppUrl = getNativeAppUrl(group.url, group.platform);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(group.url);
@@ -74,19 +71,6 @@ export const GroupJoinFlowPage: React.FC<GroupJoinFlowPageProps> = ({
 
     onConfirmJoin(group);
     window.open(group.url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleNativeAppJoin = () => {
-    if (!nativeAppUrl) return;
-    fireConfetti({
-      particleCount: 50,
-      spread: 70,
-      origin: { y: 0.6 },
-      colors: ['#10b981', '#6366f1', '#f59e0b']
-    });
-
-    onConfirmJoin(group);
-    window.location.href = nativeAppUrl;
   };
 
   return (
@@ -370,22 +354,6 @@ export const GroupJoinFlowPage: React.FC<GroupJoinFlowPageProps> = ({
               <span>{getJoinButtonLabel(group.platform)}</span>
               <ExternalLink className="w-5 h-5" />
             </button>
-
-            {/* Native App Direct Launcher (Bypasses HTTP 429 Web Rate Limits) */}
-            {nativeAppUrl && (
-              <button
-                type="button"
-                onClick={() => {
-                  fireConfetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
-                  onConfirmJoin(group);
-                  window.location.href = nativeAppUrl;
-                }}
-                className="w-full py-3 px-6 rounded-2xl font-bold text-sm sm:text-base bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
-              >
-                <Smartphone className="w-5 h-5" />
-                <span>Open Directly in Native App (Bypasses 429 Web Limits)</span>
-              </button>
-            )}
 
             {/* Join button ad placement (Hidden by default in admin dashboard) */}
             <AdDisplay slot="join_button_ad" isCurrentContextSafe={!isAdult} />

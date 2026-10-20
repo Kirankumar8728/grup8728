@@ -1862,35 +1862,5 @@ export function extractUrlsFromText(text: string): string[] {
   return uniqueUrls;
 }
 
-/**
- * Generates native app deep link for WhatsApp, Telegram, or Discord.
- * Opening directly in the native application completely bypasses web-based HTTP 429 rate limit errors.
- */
-export function getNativeAppUrl(url: string, platform?: Platform): string | null {
-  if (!url || typeof url !== 'string') return null;
-  const clean = url.trim();
 
-  // WhatsApp: chat.whatsapp.com/INVITE_CODE -> whatsapp://chat?code=INVITE_CODE
-  const waMatch = clean.match(/chat\.whatsapp\.com\/(?:invite\/)?([a-zA-Z0-9_-]+)/i);
-  if (waMatch && waMatch[1]) {
-    return `whatsapp://chat?code=${waMatch[1]}`;
-  }
 
-  // Telegram: t.me/joinchat/xxx, t.me/+xxx, or t.me/username -> tg://...
-  const tgPlusMatch = clean.match(/t\.me\/(?:\+|joinchat\/)([a-zA-Z0-9_-]+)/i);
-  if (tgPlusMatch && tgPlusMatch[1]) {
-    return `tg://join?invite=${tgPlusMatch[1]}`;
-  }
-  const tgUserMatch = clean.match(/t\.me\/([a-zA-Z0-9_]+)/i);
-  if (tgUserMatch && tgUserMatch[1] && !['joinchat', 'c'].includes(tgUserMatch[1])) {
-    return `tg://resolve?domain=${tgUserMatch[1]}`;
-  }
-
-  // Discord: discord.gg/CODE or discord.com/invite/CODE -> discord://invite/CODE
-  const dcMatch = clean.match(/(?:discord\.gg|discord\.com\/invite)\/([a-zA-Z0-9_-]+)/i);
-  if (dcMatch && dcMatch[1]) {
-    return `discord://invite/${dcMatch[1]}`;
-  }
-
-  return null;
-}

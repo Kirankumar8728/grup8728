@@ -74,11 +74,11 @@ export async function POST(req: NextRequest) {
   try {
     const auth = await resolveAuthContext(req);
 
-    // Rate limit: 30 submissions per 10 minutes per IP for non-admins (relaxed to prevent false 429 lockouts)
+    // Rate limit: 5 submissions per 10 minutes per IP for non-admins
     if (!auth.isAdmin) {
-      const rateLimit = checkRateLimit(req, { limit: 30, windowMs: 10 * 60 * 1000, route: 'api_groups_post' });
+      const rateLimit = checkRateLimit(req, { limit: 5, windowMs: 10 * 60 * 1000, route: 'api_groups_post' });
       if (!rateLimit.allowed) {
-        return rateLimitResponse(rateLimit.retryAfterSeconds, 'Submission rate limit reached. Please wait before submitting another community.', 30, req);
+        return rateLimitResponse(rateLimit.retryAfterSeconds, 'Submission rate limit reached. Please wait before submitting another community.');
       }
     }
 
@@ -318,12 +318,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             success: false,
-            cooldown: true,
             error: `⏳ Update Cooldown Active: This community was updated recently. Community details can only be refreshed once every 24 hours. Please try again in ${timeStr}.`,
             retryAfterHours: Math.ceil(remainingMs / (60 * 60 * 1000)),
             group: targetGroup,
           },
-          { status: 200, headers: REALTIME_NO_CACHE_HEADERS }
+          { status: 429, headers: REALTIME_NO_CACHE_HEADERS }
         );
       }
 
