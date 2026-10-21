@@ -115,6 +115,19 @@ export async function checkGroupLinkHealth(group: Group): Promise<LinkHealthResu
 
     clearTimeout(timeout);
 
+    // HTTP 429 Rate Limited: indicates upstream host/CDN is live and active
+    if (res.status === 429) {
+      return {
+        groupId: group.id,
+        url,
+        isActive: true,
+        status: 'active',
+        statusCode: 429,
+        reason: 'Rate limited by upstream host (link assumed active)',
+        checkedAt: now,
+      };
+    }
+
     // 404, 410, 500+ usually indicate dead/removed links
     if (res.status === 404 || res.status === 410) {
       return {

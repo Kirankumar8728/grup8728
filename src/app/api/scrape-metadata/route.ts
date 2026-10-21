@@ -7,9 +7,12 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const NO_CACHE_HEADERS = {
-  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0, s-maxage=0',
   'Pragma': 'no-cache',
   'Expires': '0',
+  'CDN-Cache-Control': 'no-store',
+  'Surrogate-Control': 'no-store',
+  'Cloudflare-CDN-Cache-Control': 'no-store',
 };
 
 export async function POST(req: NextRequest) {
@@ -19,15 +22,19 @@ export async function POST(req: NextRequest) {
       const rateLimit = checkRateLimit(req, { limit: 120, windowMs: 60 * 1000, route: 'scrape-metadata' });
       if (!rateLimit.allowed) {
         return NextResponse.json(
-          { error: 'Rate limit exceeded for metadata scraping. Please try again in a moment.' },
+          {
+            success: false,
+            error: 'Rate limit exceeded for metadata scraping. Please try again in a moment.',
+            retryAfterSeconds: rateLimit.retryAfterSeconds,
+          },
           { status: 429, headers: NO_CACHE_HEADERS }
         );
       }
     }
 
-    const { url, platform: requestedPlatform } = await req.json();
+    const { url, platform: requestedPlatform } = await req.json().catch(() => ({}));
     if (!url || typeof url !== 'string' || !url.trim()) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'URL is required' }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
     const norm = normalizePlatformUrl(url.trim());
@@ -35,7 +42,7 @@ export async function POST(req: NextRequest) {
 
     if (!isSafePublicUrl(targetUrl)) {
       return NextResponse.json(
-        { error: 'Invalid or restricted target URL. Only public HTTP/HTTPS URLs can be scraped.' },
+        { success: false, error: 'Invalid or restricted target URL. Only public HTTP/HTTPS URLs can be scraped.' },
         { status: 400, headers: NO_CACHE_HEADERS }
       );
     }
@@ -62,7 +69,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, { headers: NO_CACHE_HEADERS });
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message || 'Scraping failed' },
+      { success: false, error: error.message || 'Scraping failed' },
       { status: 500, headers: NO_CACHE_HEADERS }
     );
   }

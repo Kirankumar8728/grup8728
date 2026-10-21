@@ -132,6 +132,17 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ isDuplicate: false });
   } catch (error: any) {
-    return NextResponse.json({ isDuplicate: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, isDuplicate: false, error: error.message },
+      {
+        status: 500,
+        headers: {
+          'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0, s-maxage=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'CDN-Cache-Control': 'no-store',
+        },
+      }
+    );
   }
 }

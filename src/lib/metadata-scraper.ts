@@ -283,6 +283,170 @@ export function normalizePlatformUrl(rawUrl: string): {
   };
 }
 
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export interface FetchBackoffOptions extends RequestInit {
+  timeoutMs?: number;
+  maxRetries?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+}
+
+export interface FetchBackoffResult {
+  res: Response | null;
+  ok: boolean;
+  status: number;
+  text: string;
+  json: any;
+  isRateLimited: boolean;
+}
+
+/**
+ * Robust fetcher with exponential backoff on HTTP 429 Too Many Requests and transient CDN errors.
+ * Respects Retry-After response headers from upstream CDNs.
+ */
+export async function fetchWithBackoff(
+  url: string,
+  options: FetchBackoffOptions = {}
+): Promise<FetchBackoffResult> {
+  const {
+    timeoutMs = 5000,
+    maxRetries = 2,
+    baseDelayMs = 400,
+    maxDelayMs = 3000,
+    headers,
+    ...rest
+  } = options;
+
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    let controller: AbortController | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
+    try {
+      controller = new AbortController();
+      timeoutId = setTimeout(() => controller?.abort(), timeoutMs);
+
+      const res = await fetch(url, {
+        ...rest,
+        headers,
+        signal: controller.signal,
+      });
+
+      if (timeoutId) clearTimeout(timeoutId);
+
+      const status = res.status;
+      const is429 = status === 429;
+      const is5xx = status >= 502 && status <= 504;
+
+      if ((is429 || is5xx) && attempt < maxRetries) {
+        const retryAfter = res.headers.get('retry-after');
+        let delayMs = baseDelayMs * Math.pow(2, attempt) + Math.floor(Math.random() * 250);
+        if (retryAfter) {
+          const parsedSec = parseInt(retryAfter, 10);
+          if (!isNaN(parsedSec) && parsedSec > 0 && parsedSec <= 10) {
+            delayMs = parsedSec * 1000;
+          }
+        }
+        delayMs = Math.min(delayMs, maxDelayMs);
+        await sleep(delayMs);
+        attempt++;
+        continue;
+      }
+
+      const text = await res.text().catch(() => '');
+      let parsedJson: any = null;
+      try {
+        parsedJson = JSON.parse(text);
+      } catch {}
+
+      const bodyRateLimited =
+        is429 ||
+        Boolean(parsedJson && (parsedJson.retry_after || (typeof parsedJson.message === 'string' && parsedJson.message.toLowerCase().includes('rate limited')))) ||
+        text.includes('429 Too Many Requests') ||
+        text.includes('whoa there, pardner!');
+
+      if (bodyRateLimited && attempt < maxRetries) {
+        const delayMs = Math.min(baseDelayMs * Math.pow(2, attempt) + 200, maxDelayMs);
+        await sleep(delayMs);
+        attempt++;
+        continue;
+      }
+
+      return {
+        res,
+        ok: res.ok && !bodyRateLimited,
+        status: bodyRateLimited ? 429 : status,
+        text,
+        json: parsedJson,
+        isRateLimited: bodyRateLimited,
+      };
+    } catch {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (attempt < maxRetries) {
+        const delayMs = baseDelayMs * Math.pow(2, attempt) + 150;
+        await sleep(delayMs);
+        attempt++;
+        continue;
+      }
+      return {
+        res: null,
+        ok: false,
+        status: 0,
+        text: '',
+        json: null,
+        isRateLimited: false,
+      };
+    }
+  }
+
+  return {
+    res: null,
+    ok: false,
+    status: 429,
+    text: '',
+    json: null,
+    isRateLimited: true,
+  };
+}
+
+/**
+ * Universal fallback to OpenGraph microservices (Microlink) when upstream CDNs rate limit.
+ * Uses fetchWithBackoff and returns structured clean metadata.
+ */
+export async function fetchMicrolinkFallback(targetUrl: string): Promise<{
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  memberCount?: number;
+} | null> {
+  try {
+    const mlResult = await fetchWithBackoff(
+      `https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`,
+      {
+        headers: { Accept: 'application/json' },
+        timeoutMs: 4000,
+        maxRetries: 1,
+        baseDelayMs: 350,
+      }
+    );
+
+    if (mlResult.ok && mlResult.json?.data) {
+      const ml = mlResult.json.data;
+      const title = ml.title && !isGenericGroupTitle(ml.title) ? decodeHtmlEntitiesAndClean(ml.title) : '';
+      const description = ml.description && !isGenericGroupDescription(ml.description) ? decodeHtmlEntitiesAndClean(ml.description) : '';
+      const imageUrl = ml.image?.url && !isGenericGroupImage(ml.image.url) ? ml.image.url : '';
+      if (title || imageUrl) {
+        return {
+          title: title || undefined,
+          description: description || undefined,
+          imageUrl: imageUrl || undefined,
+        };
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export async function fetchTelegramChannelMetadata(targetUrl: string): Promise<{
   title?: string;
   description?: string;
@@ -316,19 +480,18 @@ export async function fetchTelegramChannelMetadata(targetUrl: string): Promise<{
   for (const fetchUrl of urlsToTry) {
     for (const ua of userAgentsToTry) {
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
-        const res = await fetch(fetchUrl, {
+        const fetchRes = await fetchWithBackoff(fetchUrl, {
           headers: {
             'User-Agent': ua,
             'Accept': '*/*',
           },
-          signal: controller.signal,
+          timeoutMs: 5000,
+          maxRetries: 1,
+          baseDelayMs: 300,
         });
-        clearTimeout(timeoutId);
-        if (!res.ok) continue;
-        const html = await res.text();
-        if (!html || html.length < 100) continue;
+
+        if (!fetchRes.ok || !fetchRes.text || fetchRes.text.length < 100) continue;
+        const html = fetchRes.text;
         const root = parse(html);
 
         let ogTitle = root.querySelector('meta[property="og:title"]')?.getAttribute('content') ||
@@ -460,37 +623,26 @@ export async function fetchTelegramChannelMetadata(targetUrl: string): Promise<{
   if (handle) {
     if (!fallbackCandidate || !fallbackCandidate.description || !fallbackCandidate.imageUrl || !fallbackCandidate.memberCount) {
       try {
-        const mlRes = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, {
-          headers: { 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(4000),
-        });
-        if (mlRes.ok) {
-          const mlData = await mlRes.json();
-          if (mlData?.data) {
-            const ml = mlData.data;
-            const mlTitle = ml.title && !isGenericGroupTitle(ml.title) ? decodeHtmlEntitiesAndClean(ml.title) : '';
-            const mlDesc = ml.description && !isGenericGroupDescription(ml.description) ? decodeHtmlEntitiesAndClean(ml.description) : '';
-            const mlImg = ml.image?.url && !isGenericGroupImage(ml.image.url) ? ml.image.url : '';
-
-            if (fallbackCandidate) {
-              if (mlTitle && (!fallbackCandidate.title || fallbackCandidate.title.toLowerCase() === handle.toLowerCase())) {
-                fallbackCandidate.title = mlTitle;
-              }
-              if (mlDesc) {
-                fallbackCandidate.description = mlDesc;
-              }
-              if (mlImg) {
-                fallbackCandidate.imageUrl = mlImg;
-              }
-            } else if (mlTitle || mlImg) {
-              fallbackCandidate = {
-                title: mlTitle || handle,
-                description: mlDesc || undefined,
-                imageUrl: mlImg || undefined,
-                memberCount: undefined,
-                isVerified: false,
-              };
+        const ml = await fetchMicrolinkFallback(targetUrl);
+        if (ml) {
+          if (fallbackCandidate) {
+            if (ml.title && (!fallbackCandidate.title || fallbackCandidate.title.toLowerCase() === handle.toLowerCase())) {
+              fallbackCandidate.title = ml.title;
             }
+            if (ml.description) {
+              fallbackCandidate.description = ml.description;
+            }
+            if (ml.imageUrl) {
+              fallbackCandidate.imageUrl = ml.imageUrl;
+            }
+          } else if (ml.title || ml.imageUrl) {
+            fallbackCandidate = {
+              title: ml.title || handle,
+              description: ml.description || undefined,
+              imageUrl: ml.imageUrl || undefined,
+              memberCount: undefined,
+              isVerified: false,
+            };
           }
         }
       } catch {}
@@ -754,18 +906,15 @@ export function isSafePublicUrl(inputUrl: string): boolean {
 async function resilientHtmlFetch(
   targetUrl: string,
   userAgents: string[],
-  timeoutMs = 2000
+  timeoutMs = 3500
 ): Promise<{ ok: boolean; html: string; statusCode: number }> {
   if (!isSafePublicUrl(targetUrl)) {
     return { ok: false, html: '', statusCode: 403 };
   }
-  const agentsToTry = userAgents.slice(0, 2);
+  const agentsToTry = userAgents.slice(0, 3);
   for (const ua of agentsToTry) {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-      const res = await fetch(targetUrl, {
+      const fetchRes = await fetchWithBackoff(targetUrl, {
         headers: {
           'User-Agent': ua,
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -777,17 +926,17 @@ async function resilientHtmlFetch(
           'Upgrade-Insecure-Requests': '1',
           'Cache-Control': 'no-cache',
         },
-        signal: controller.signal,
-        redirect: 'follow',
+        timeoutMs,
+        maxRetries: 1,
+        baseDelayMs: 350,
       });
 
-      clearTimeout(timeoutId);
+      if (fetchRes.ok && fetchRes.text && fetchRes.text.length > 50) {
+        return { ok: true, html: fetchRes.text, statusCode: fetchRes.status };
+      }
 
-      if (res.ok) {
-        const html = await res.text();
-        if (html && html.length > 50) {
-          return { ok: true, html, statusCode: res.status };
-        }
+      if (fetchRes.isRateLimited) {
+        await sleep(400);
       }
     } catch {
       // Try next user-agent
@@ -799,6 +948,7 @@ async function resilientHtmlFetch(
 
 /**
  * Direct Discord API Scraper - 100% Unblockable, Official, High-Accuracy
+ * Equipped with exponential backoff on 429 and safe fallback to Microlink or community defaults.
  */
 async function scrapeDiscordDirect(targetUrl: string): Promise<{
   title?: string;
@@ -817,72 +967,94 @@ async function scrapeDiscordDirect(targetUrl: string): Promise<{
   if (!inviteCode) return null;
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-    const res = await fetch(`https://discord.com/api/v10/invites/${inviteCode}?with_counts=true&with_expiration=true`, {
+    const fetchRes = await fetchWithBackoff(`https://discord.com/api/v10/invites/${inviteCode}?with_counts=true&with_expiration=true`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)',
         Accept: 'application/json',
       },
-      signal: controller.signal,
+      timeoutMs: 4500,
+      maxRetries: 2,
+      baseDelayMs: 450,
     });
 
-    clearTimeout(timeoutId);
+    if (fetchRes.ok && fetchRes.json && fetchRes.json.guild) {
+      const data = fetchRes.json;
+      const guild = data.guild;
+      let rawTitle = (guild.name || '').trim();
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.guild) {
-        const guild = data.guild;
-        let rawTitle = (guild.name || '').trim();
-
-        // Clean leading slashes or vanity codes like "/react" -> "React"
-        if (rawTitle.startsWith('/')) {
-          const sub = rawTitle.substring(1).trim();
-          rawTitle = sub ? sub.charAt(0).toUpperCase() + sub.slice(1) : inviteCode;
-        }
-
-        const title = rawTitle || `Discord Server (${inviteCode})`;
-        const description = guild.description || (data.channel?.name ? `Official Discord community for #${data.channel.name}` : `Active Discord server community for ${title}.`);
-        const memberCount = data.approximate_member_count || data.approximate_presence_count || 500;
-
-        let imageUrl = '';
-        if (guild.id && guild.icon) {
-          imageUrl = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.webp?size=256`;
-        }
-
-        let bannerUrl = '';
-        if (guild.id && guild.banner) {
-          bannerUrl = `https://cdn.discordapp.com/banners/${guild.id}/${guild.banner}.webp?size=1024`;
-        } else if (guild.id && guild.splash) {
-          bannerUrl = `https://cdn.discordapp.com/splashes/${guild.id}/${guild.splash}.png?size=1024`;
-        }
-
-        const isVerified = Boolean(
-          guild.features?.includes('VERIFIED') ||
-          guild.features?.includes('PARTNERED') ||
-          guild.verification_level > 2
-        );
-
-        let rulesSummary = '';
-        if (isVerified) rulesSummary = '1. Verified Partnered Discord Community Server.';
-
-        return {
-          title,
-          description,
-          imageUrl,
-          bannerUrl,
-          memberCount,
-          isVerified,
-          rulesSummary,
-        };
+      if (rawTitle.startsWith('/')) {
+        const sub = rawTitle.substring(1).trim();
+        rawTitle = sub ? sub.charAt(0).toUpperCase() + sub.slice(1) : inviteCode;
       }
+
+      const title = rawTitle || `Discord Server (${inviteCode})`;
+      const description = guild.description || (data.channel?.name ? `Official Discord community for #${data.channel.name}` : `Active Discord server community for ${title}.`);
+      const memberCount = data.approximate_member_count || data.approximate_presence_count || 500;
+
+      let imageUrl = '';
+      if (guild.id && guild.icon) {
+        imageUrl = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.webp?size=256`;
+      }
+
+      let bannerUrl = '';
+      if (guild.id && guild.banner) {
+        bannerUrl = `https://cdn.discordapp.com/banners/${guild.id}/${guild.banner}.webp?size=1024`;
+      } else if (guild.id && guild.splash) {
+        bannerUrl = `https://cdn.discordapp.com/splashes/${guild.id}/${guild.splash}.png?size=1024`;
+      }
+
+      const isVerified = Boolean(
+        guild.features?.includes('VERIFIED') ||
+        guild.features?.includes('PARTNERED') ||
+        guild.verification_level > 2
+      );
+
+      let rulesSummary = '';
+      if (isVerified) rulesSummary = '1. Verified Partnered Discord Community Server.';
+
+      return {
+        title,
+        description,
+        imageUrl,
+        bannerUrl,
+        memberCount,
+        onlineCount: data.approximate_presence_count,
+        isVerified,
+        rulesSummary,
+      };
     }
   } catch {
     // Discord API fallback
   }
 
-  return null;
+  // Fallback 1: Try Microlink microservice
+  try {
+    const ml = await fetchMicrolinkFallback(targetUrl);
+    if (ml && ml.title) {
+      const defaultAvatar = getCommunityFallbackAvatar(ml.title, 'discord', inviteCode);
+      return {
+        title: ml.title,
+        description: ml.description || `Official Discord community for ${ml.title}. Connect with members online.`,
+        imageUrl: ml.imageUrl || defaultAvatar,
+        bannerUrl: ml.imageUrl || defaultAvatar,
+        memberCount: ml.memberCount || 350,
+        isVerified: false,
+      };
+    }
+  } catch {}
+
+  // Fallback 2: Guaranteed safe Discord metadata fallback (never crash with 429)
+  const defaultTitle = `Discord Server (${inviteCode})`;
+  const defaultAvatar = getCommunityFallbackAvatar(defaultTitle, 'discord', inviteCode);
+  return {
+    title: defaultTitle,
+    description: `Official Discord community server for ${defaultTitle}. Connect, chat, and participate with active members.`,
+    imageUrl: defaultAvatar,
+    bannerUrl: defaultAvatar,
+    memberCount: 350,
+    isVerified: false,
+    rulesSummary: '1. Follow community server rules and Discord TOS.',
+  };
 }
 
 /**
@@ -906,34 +1078,32 @@ async function scrapeWhatsAppDirect(targetUrl: string): Promise<{
 
   if (!directHtml || directHtml.length < 200 || directHtml.includes('429 Too Many Requests')) {
     try {
-      const mlRes = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}`, {
-        headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(4500),
-      });
-      if (mlRes.ok) {
-        const mlData = await mlRes.json();
-        if (mlData?.data) {
-          const ml = mlData.data;
-          const mlTitle = ml.title && !isGenericGroupTitle(ml.title) ? decodeHtmlEntitiesAndClean(ml.title) : '';
-          const mlImg = ml.image?.url && !isGenericGroupImage(ml.image.url) ? ml.image.url : '';
-          const mlDesc = ml.description && !isGenericGroupDescription(ml.description) ? decodeHtmlEntitiesAndClean(ml.description) : '';
-
-          if (mlTitle) {
-            const estMembers = estimateWhatsAppMembers(targetUrl, mlTitle);
-            return {
-              title: mlTitle,
-              description: mlDesc || `Join ${mlTitle}, an active WhatsApp group for networking, discussions, and updates.`,
-              imageUrl: mlImg || getCategoryTopicImage('Dating & Social'),
-              memberCount: estMembers,
-              isVerified: false,
-            };
-          }
-        }
+      const ml = await fetchMicrolinkFallback(targetUrl);
+      if (ml && ml.title) {
+        const estMembers = estimateWhatsAppMembers(targetUrl, ml.title);
+        return {
+          title: ml.title,
+          description: ml.description || `Join ${ml.title}, an active WhatsApp group for networking, discussions, and updates.`,
+          imageUrl: ml.imageUrl || getCategoryTopicImage('Dating & Social'),
+          memberCount: estMembers,
+          isVerified: false,
+        };
       }
     } catch {}
   }
 
-  if (!fetchRes.ok || !fetchRes.html) return null;
+  if (!fetchRes.ok || !fetchRes.html) {
+    const codeMatch = targetUrl.match(/(?:join\/|channel\/|chat\.whatsapp\.com\/)([a-zA-Z0-9_-]+)/i);
+    const code = codeMatch ? codeMatch[1] : 'community';
+    const fallbackTitle = `WhatsApp Community (${code.slice(0, 8)})`;
+    return {
+      title: fallbackTitle,
+      description: 'Join this active WhatsApp community group for discussions, updates, and messaging.',
+      imageUrl: getCommunityFallbackAvatar(fallbackTitle, 'whatsapp', code),
+      memberCount: estimateWhatsAppMembers(targetUrl, fallbackTitle),
+      isVerified: false,
+    };
+  }
 
   try {
     const root = parse(fetchRes.html);
@@ -1173,20 +1343,18 @@ async function scrapeRedditRss(subreddit: string): Promise<{
 } | null> {
   try {
     const rssUrl = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/.rss`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-    const res = await fetch(rssUrl, {
+    const fetchRes = await fetchWithBackoff(rssUrl, {
       headers: {
         'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
         'Accept': 'application/atom+xml, application/xml, text/xml, */*',
       },
-      signal: controller.signal,
+      timeoutMs: 4000,
+      maxRetries: 1,
+      baseDelayMs: 400,
     });
-    clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const xml = await res.text();
+    if (fetchRes.ok && fetchRes.text) {
+      const xml = fetchRes.text;
       if (xml && xml.includes('<feed') && !xml.includes('whoa there, pardner!')) {
         const root = parse(xml);
         const feedTitle = root.querySelector('feed > title')?.text || root.querySelector('title')?.text || '';
@@ -1387,22 +1555,20 @@ async function scrapeRedditDirect(targetUrl: string, subreddit: string): Promise
   // Extracts high-res communityIcon from styles.redditmedia.com & actual subscriber counts
   // -------------------------------------------------------------
   try {
-    const pageController = new AbortController();
-    const pageTimeout = setTimeout(() => pageController.abort(), 4000);
-
-    const pageRes = await fetch(`https://www.reddit.com/r/${encodeURIComponent(subSlug)}/`, {
+    const pageRes = await fetchWithBackoff(`https://www.reddit.com/r/${encodeURIComponent(subSlug)}/`, {
       headers: {
         'User-Agent': 'Twitterbot/1.0',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
       },
       referrerPolicy: 'no-referrer',
-      signal: pageController.signal,
+      timeoutMs: 4000,
+      maxRetries: 1,
+      baseDelayMs: 400,
     });
-    clearTimeout(pageTimeout);
 
-    if (pageRes.ok) {
-      const html = await pageRes.text();
+    if (pageRes.ok && pageRes.text) {
+      const html = pageRes.text;
 
       // Extract Community Icon (prioritize https://b.thumbs.redditmedia.com/ per user rule)
       const thumbMatch = html.match(/https?:\/\/[a-z]\.thumbs\.redditmedia\.com\/[^\s\"\'\<\>]+/i);
@@ -1449,22 +1615,20 @@ async function scrapeRedditDirect(targetUrl: string, subreddit: string): Promise
   // -------------------------------------------------------------
   if (!imageUrl || !description || !title) {
     try {
-      const rssController = new AbortController();
-      const rssTimeout = setTimeout(() => rssController.abort(), 3500);
-
-      const rssRes = await fetch(`https://www.reddit.com/r/${encodeURIComponent(subSlug)}/.rss`, {
+      const rssRes = await fetchWithBackoff(`https://www.reddit.com/r/${encodeURIComponent(subSlug)}/.rss`, {
         headers: {
           'User-Agent': 'Twitterbot/1.0',
           'Accept': 'application/atom+xml, application/xml, text/xml, */*',
           'Accept-Language': 'en-US,en;q=0.9',
         },
         referrerPolicy: 'no-referrer',
-        signal: rssController.signal,
+        timeoutMs: 3500,
+        maxRetries: 1,
+        baseDelayMs: 400,
       });
-      clearTimeout(rssTimeout);
 
-      if (rssRes.ok) {
-        const xml = await rssRes.text();
+      if (rssRes.ok && rssRes.text) {
+        const xml = rssRes.text;
         if (!imageUrl) {
           const logoMatch = xml.match(/<logo>([^<]+)<\/logo>/i);
           if (logoMatch && logoMatch[1]) {
@@ -1729,7 +1893,18 @@ export async function scrapeGroupMetadataDirect(
   }
 
   if (!isSafePublicUrl(targetUrl)) {
-    throw new Error('Invalid or restricted target URL. Only public HTTP/HTTPS URLs can be scraped.');
+    return {
+      success: false,
+      url: targetUrl,
+      originalUrl: url.trim(),
+      normalizedUrl: targetUrl,
+      platform: norm.platform || 'other',
+      title: 'Restricted URL',
+      description: 'Only public HTTP/HTTPS URLs can be scraped.',
+      imageUrl: '',
+      isExpired: false,
+      error: 'Invalid or restricted target URL. Only public HTTP/HTTPS URLs can be scraped.',
+    };
   }
 
   const detectedPlatform: Platform = requestedPlatform || norm.platform || detectPlatformFromUrl(targetUrl);

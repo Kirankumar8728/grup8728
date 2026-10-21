@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message },
+      { success: false, error: error.message },
       {
         status: 500,
         headers: REALTIME_NO_CACHE_HEADERS,
@@ -578,8 +578,8 @@ export async function DELETE(req: NextRequest) {
       } catch {}
       return NextResponse.json({ success: true, count: deletedCount }, { headers: REALTIME_NO_CACHE_HEADERS });
     }
-    return NextResponse.json({ error: 'ids array required' }, { status: 400, headers: REALTIME_NO_CACHE_HEADERS });
+    return NextResponse.json({ success: false, error: 'ids array required' }, { status: 400, headers: REALTIME_NO_CACHE_HEADERS });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: REALTIME_NO_CACHE_HEADERS });
+    return NextResponse.json({ success: false, error: error.message }, { status: 500, headers: REALTIME_NO_CACHE_HEADERS });
   }
 }

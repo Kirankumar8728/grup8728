@@ -112,12 +112,19 @@ export function checkRateLimit(
 export function rateLimitResponse(retryAfterSeconds: number, message?: string, limit: number = 60): NextResponse {
   return NextResponse.json(
     {
+      success: false,
       error: message || 'Too many requests. Please slow down and try again later.',
       retryAfterSeconds,
     },
     {
       status: 429,
       headers: {
+        'Cache-Control': 'private, no-cache, no-store, must-revalidate, max-age=0, s-maxage=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'CDN-Cache-Control': 'no-store',
+        'Surrogate-Control': 'no-store',
+        'Cloudflare-CDN-Cache-Control': 'no-store',
         'Retry-After': String(retryAfterSeconds),
         'X-RateLimit-Limit': String(limit),
         'X-RateLimit-Remaining': '0',

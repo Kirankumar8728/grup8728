@@ -115,6 +115,8 @@ export const SubmitGroupView = () => {
   const [imageUploadError, setImageUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+  const lastScrapeTimeRef = useRef<number>(0);
+  const lastSubmitTimeRef = useRef<number>(0);
 
   // Statuses
   const [isScraping, setIsScraping] = useState(false);
@@ -261,6 +263,13 @@ export const SubmitGroupView = () => {
       return;
     }
 
+    const now = Date.now();
+    if (now - lastScrapeTimeRef.current < 2000) {
+      setScrapeError('⏳ Please wait a moment before requesting another metadata scrape.');
+      return;
+    }
+    lastScrapeTimeRef.current = now;
+
     if (isAutoFetchDisabledPlatform) {
       setScrapeError(`Auto-fetch is disabled for ${detectedPlat.toUpperCase()} links. Please enter community details manually below.`);
       setManualModeActive(true);
@@ -284,10 +293,27 @@ export const SubmitGroupView = () => {
         body: JSON.stringify({ url: url.trim() })
       });
 
-      const data: ScrapeMetadataResponse = await res.json();
+      const data: ScrapeMetadataResponse = await res.json().catch(() => ({ success: false, error: 'Network error during scraping' } as any));
+
+      // Handle 429 or upstream rate limits with immediate user-facing guidance
+      if (res.status === 429 || (data?.error && (data.error.toLowerCase().includes('rate limit') || data.error.toLowerCase().includes('too many requests')))) {
+        setScrapeError('⚠️ External rate limit reached for auto-fetching. Manual editing mode is now enabled below so you can enter community details directly without waiting.');
+        setManualModeActive(true);
+        const detected = platform !== 'other' ? platform : detectPlatformFromUrl(url);
+        const platLabel = detected !== 'other' ? (detected.charAt(0).toUpperCase() + detected.slice(1)) : 'Community';
+        if (!title.trim()) {
+          setTitle(`${platLabel} Community Group`);
+        }
+        if (!description.trim()) {
+          setDescription(`Join this active ${platLabel} community for discussions, updates, and messaging.`);
+        }
+        return;
+      }
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Unable to scrape metadata. You can enter details manually.');
+        setScrapeError(data.error || 'Unable to scrape metadata. You can enter details manually below.');
+        setManualModeActive(true);
+        return;
       }
 
       // Populate scraped data with robust cleaning
@@ -328,8 +354,8 @@ export const SubmitGroupView = () => {
 
       setScrapedSuccess(true);
     } catch (err: any) {
-      console.warn('Scraping error:', err);
-      setScrapeError(err.message || 'Scraping timed out. You can fill the fields manually below.');
+      console.warn('Scraping notice:', err);
+      setScrapeError('Unable to auto-fetch metadata from upstream platform. Manual editing mode is enabled below.');
       setManualModeActive(true);
     } finally {
       setIsScraping(false);
@@ -512,6 +538,13 @@ export const SubmitGroupView = () => {
       return;
     }
 
+    const now = Date.now();
+    if (isSubmitting || (now - lastSubmitTimeRef.current < 2500)) {
+      setSubmitError('⏳ Submission in progress or sent too rapidly. Please wait a moment.');
+      return;
+    }
+    lastSubmitTimeRef.current = now;
+
     const cleanDesc = description.trim();
     const descWordCount = cleanDesc ? cleanDesc.split(/\s+/).filter(Boolean).length : 0;
     if (!cleanDesc || descWordCount < 1) {
@@ -591,9 +624,14 @@ export const SubmitGroupView = () => {
         const res = await fetch('/api/groups', {
           method: 'POST',
           headers,
+          cache: 'no-store',
           body: JSON.stringify(payload)
         });
-        data = await res.json();
+        data = await res.json().catch(() => null);
+        if (res.status === 429) {
+          setSubmitError(`⏳ Rate Limit: ${data?.error || 'Submissions are being sent too quickly. Please wait a few seconds and try again.'}`);
+          return;
+        }
       } catch (fetchErr: any) {
         console.warn('[SubmitGroupUI] Fetch failed, executing Server Action submitGroupAction fallback...', fetchErr);
         data = await submitGroupAction(payload as any);
@@ -610,6 +648,10 @@ export const SubmitGroupView = () => {
             reason: data.error
           });
           setSubmitError(`This community is already listed as "${data.matchedGroup.title}". Click "Update Existing Group" to update its details.`);
+          return;
+        }
+        if (data?.diagnosticStep === 'SUBMISSION_THROTTLED' || data?.error?.toLowerCase().includes('rate limit') || data?.error?.toLowerCase().includes('rapidly')) {
+          setSubmitError(`⏳ Rate Limit: ${data.error || 'Submissions sent too rapidly. Please wait a moment and try again.'}`);
           return;
         }
         console.error('[SubmitGroupUI] Submission rejected by server:', data?.error || 'Unknown server rejection');

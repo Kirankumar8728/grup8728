@@ -176,9 +176,9 @@ const nextConfig = {
           },
         ],
       },
-      // 4. Admin & User realtime dashboards
+      // 4. Admin & User realtime dashboards & submission routes
       {
-        source: '/(admin|kiran8728|direct-pay)/(.*)',
+        source: '/(admin|kiran8728|direct-pay|submit|submit-group)(.*)',
         headers: [
           {
             key: 'Cache-Control',

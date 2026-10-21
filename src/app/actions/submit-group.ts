@@ -49,6 +49,21 @@ export interface SubmitGroupResult {
   retryAfterHours?: number;
 }
 
+// Client-side submission throttling map to prevent rapid duplicate requests
+const SUBMISSION_COOLDOWN_MS = 2000;
+const CLIENT_SUBMISSION_MAP = new Map<string, number>();
+
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, timestamp] of CLIENT_SUBMISSION_MAP.entries()) {
+      if (now - timestamp > 60000) {
+        CLIENT_SUBMISSION_MAP.delete(key);
+      }
+    }
+  }, 60000);
+}
+
 /**
  * Server Action for safe, validated, and logged community submissions.
  * Validates against database schema and platform policies.
@@ -56,24 +71,42 @@ export interface SubmitGroupResult {
 export async function submitGroupAction(input: SubmitGroupInput): Promise<SubmitGroupResult> {
   const timestamp = new Date().toISOString();
   console.log(`[SubmitGroupAction][${timestamp}] --- New Submission Attempt Initiated ---`);
-  console.log(`[SubmitGroupAction] Input received:`, {
-    title: input.title,
-    url: input.url,
-    platform: input.platform,
-    category: input.category,
-    memberCount: input.memberCount,
-    updateExisting: input.updateExisting,
-  });
 
-  // Step 1: Validate Required Fields
-  if (!input.url || typeof input.url !== 'string' || !input.url.trim()) {
-    console.warn(`[SubmitGroupAction] Failed at Step 1: Missing invite URL.`);
-    return {
-      success: false,
-      error: 'Group invite URL is required.',
-      diagnosticStep: 'VALIDATE_REQUIRED_URL',
-    };
+  // Client-side submission debouncing / throttling
+  const throttleKey = (input.url || '').trim().toLowerCase();
+  if (throttleKey) {
+    const lastTime = CLIENT_SUBMISSION_MAP.get(throttleKey);
+    const now = Date.now();
+    if (lastTime && (now - lastTime) < SUBMISSION_COOLDOWN_MS) {
+      console.warn(`[SubmitGroupAction] Throttled: Submission attempted too rapidly (${now - lastTime}ms).`);
+      return {
+        success: false,
+        error: '⏳ Submission request received too rapidly. Please wait a moment before trying again.',
+        diagnosticStep: 'SUBMISSION_THROTTLED',
+      };
+    }
+    CLIENT_SUBMISSION_MAP.set(throttleKey, now);
   }
+
+  try {
+    console.log(`[SubmitGroupAction] Input received:`, {
+      title: input.title,
+      url: input.url,
+      platform: input.platform,
+      category: input.category,
+      memberCount: input.memberCount,
+      updateExisting: input.updateExisting,
+    });
+
+    // Step 1: Validate Required Fields
+    if (!input.url || typeof input.url !== 'string' || !input.url.trim()) {
+      console.warn(`[SubmitGroupAction] Failed at Step 1: Missing invite URL.`);
+      return {
+        success: false,
+        error: 'Group invite URL is required.',
+        diagnosticStep: 'VALIDATE_REQUIRED_URL',
+      };
+    }
 
   // Reject adult submissions when AdSense Safe Mode is active
   if (isAdultContentHidden() && (input.isNsfw || input.category === 'Adult / 18+')) {
@@ -476,6 +509,14 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
       success: false,
       error: dbErr?.message || 'Database error while saving community. Please try again.',
       diagnosticStep: 'DB_WRITE_EXCEPTION',
+    };
+  }
+  } catch (unhandledErr: any) {
+    console.error(`[SubmitGroupAction FATAL] Unexpected unhandled error:`, unhandledErr?.message, unhandledErr?.stack);
+    return {
+      success: false,
+      error: unhandledErr?.message || 'Server error while processing community submission. Please try again.',
+      diagnosticStep: 'ACTION_UNHANDLED_EXCEPTION',
     };
   }
 }
