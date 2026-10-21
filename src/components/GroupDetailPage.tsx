@@ -33,9 +33,12 @@ import {
   Compass,
   User,
   Crown,
-  AlertTriangle,
   RefreshCw,
-  ShieldAlert
+  ShieldAlert,
+  Lock,
+  Unlock,
+  AlertTriangle,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Group } from '../types';
 import { 
@@ -206,6 +209,78 @@ export const GroupDetailPage: React.FC<GroupDetailPageProps> = ({
       alert(`Re-scrape error: ${err.message || 'Network error'}`);
     } finally {
       setIsRescraping(false);
+    }
+  };
+
+  const handleAdminChangeImage = async () => {
+    if (!group || !group.id) return;
+    const currentImg = group.imageUrl || '';
+    const newUrl = prompt(
+      `Enter new image URL or base64 data for "${group.title}".\nIt will be resized to 150x150 WebP and uploaded to Cloudflare R2 (cdn.grouplinks.app):`,
+      currentImg.includes('cdn.grouplinks.app') ? currentImg : ''
+    );
+    if (!newUrl || !newUrl.trim() || newUrl.trim() === currentImg) return;
+
+    try {
+      const headers = getAdminAuthHeaders();
+      const res = await fetch('/api/admin/rescrape', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({
+          groupId: group.id,
+          action: 'change_image',
+          newImageUrl: newUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(`Failed to update image: ${data.error || 'Server error'}`);
+        return;
+      }
+      if (data.updatedGroup) {
+        setGroup(data.updatedGroup);
+        setRescrapeNotice('✅ Group image updated & uploaded to Cloudflare R2 CDN!');
+        setTimeout(() => setRescrapeNotice(null), 4000);
+      }
+    } catch (err: any) {
+      alert(`Error updating image: ${err.message || 'Network error'}`);
+    }
+  };
+
+  const handleAdminToggleLock = async () => {
+    if (!group || !group.id) return;
+    const currentLocked = Boolean(group.isUpdateLocked);
+    const newLock = !currentLocked;
+
+    try {
+      const headers = getAdminAuthHeaders();
+      const res = await fetch('/api/admin/rescrape', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({
+          groupId: group.id,
+          action: 'toggle_lock',
+          isUpdateLocked: newLock,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(`Failed to toggle lock: ${data.error || 'Server error'}`);
+        return;
+      }
+      if (data.updatedGroup) {
+        setGroup(data.updatedGroup);
+        setRescrapeNotice(data.message || (newLock ? '🔒 User updates locked' : '🔓 User updates unlocked'));
+        setTimeout(() => setRescrapeNotice(null), 4000);
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message || 'Network error'}`);
     }
   };
   

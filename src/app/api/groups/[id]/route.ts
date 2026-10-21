@@ -3,6 +3,8 @@ import { revalidatePath } from 'next/cache';
 import { getGroupById, updateGroup, deleteGroup } from '@/src/lib/groups-dal';
 import { sanitizeHtml, sanitizeInput } from '@/src/lib/security';
 import { resolveAuthContext } from '@/src/lib/auth-helpers';
+import { isUserGroupUpdatesAllowed, getUserUpdateCooldownMs } from '@/src/lib/content-settings';
+import { uploadImageToR2 } from '@/src/lib/r2-storage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -49,6 +51,41 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       );
     }
 
+    // Master admin disable check for non-admin users
+    if (!auth.isAdmin) {
+      if (!isUserGroupUpdatesAllowed() || existing.allowUserUpdates === false || existing.isUpdateLocked) {
+        return NextResponse.json(
+          { success: false, error: '🔒 Community updates by visitors or members are currently disabled by administration.' },
+          { status: 403 }
+        );
+      }
+
+      // 1-Week (7-day) update cooldown check
+      const cooldownMs = getUserUpdateCooldownMs();
+      const lastUserUpdatedTime = existing.lastUserUpdatedAt
+        ? new Date(existing.lastUserUpdatedAt).getTime()
+        : (existing.updatedAt ? new Date(existing.updatedAt).getTime() : 0);
+      const timeSinceLastUpdate = Date.now() - lastUserUpdatedTime;
+
+      if (lastUserUpdatedTime > 0 && timeSinceLastUpdate < cooldownMs) {
+        const remainingMs = cooldownMs - timeSinceLastUpdate;
+        const daysRemaining = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+        const hoursRemaining = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+        const timeStr = daysRemaining > 0
+          ? `${daysRemaining} day${daysRemaining > 1 ? 's' : ''} and ${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''}`
+          : `${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''}`;
+
+        return NextResponse.json(
+          {
+            success: false,
+            error: `⏳ Update Cooldown Active: Communities can only be updated 1 time per week. Next available update in ${timeStr}.`,
+            retryAfterHours: Math.ceil(remainingMs / (60 * 60 * 1000)),
+          },
+          { status: 429 }
+        );
+      }
+    }
+
     const body = await req.json();
 
     // Whitelist only safe, user-editable fields unless user is an admin
@@ -73,13 +110,27 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       updatePayload.memberCount = Number(body.memberCount) || 0;
     }
     if (body.imageUrl !== undefined && typeof body.imageUrl === 'string' && body.imageUrl.trim()) {
-      updatePayload.imageUrl = body.imageUrl.trim();
+      let finalImg = body.imageUrl.trim();
+      // If admin updates image, upload to R2 / cdn.grouplinks.app
+      if (auth.isAdmin && !finalImg.includes('cdn.grouplinks.app')) {
+        try {
+          const r2Res = await uploadImageToR2(finalImg, body.title || existing.title || 'group-icon');
+          if (r2Res.success && r2Res.r2Url) {
+            finalImg = r2Res.r2Url;
+          }
+        } catch {}
+      }
+      updatePayload.imageUrl = finalImg;
     }
     if (body.bannerUrl !== undefined && typeof body.bannerUrl === 'string' && body.bannerUrl.trim()) {
       updatePayload.bannerUrl = body.bannerUrl.trim();
     }
 
-    // Only administrators can toggle verification, promotion, featured, sticky, or status
+    if (!auth.isAdmin) {
+      updatePayload.lastUserUpdatedAt = new Date().toISOString();
+    }
+
+    // Only administrators can toggle verification, promotion, featured, sticky, update locks, or status
     if (auth.isAdmin) {
       if (body.verified !== undefined) updatePayload.verified = Boolean(body.verified);
       if (body.featured !== undefined) updatePayload.featured = Boolean(body.featured);
@@ -88,6 +139,8 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       if (body.stickyOrder !== undefined) updatePayload.stickyOrder = Number(body.stickyOrder);
       if (body.isPromoted !== undefined) updatePayload.isPromoted = Boolean(body.isPromoted);
       if (body.status !== undefined) updatePayload.status = body.status;
+      if (body.isUpdateLocked !== undefined) updatePayload.isUpdateLocked = Boolean(body.isUpdateLocked);
+      if (body.allowUserUpdates !== undefined) updatePayload.allowUserUpdates = Boolean(body.allowUserUpdates);
     }
 
     const updated = await updateGroup(id, updatePayload);

@@ -57,7 +57,10 @@ import {
   Sparkles,
   Radio,
   Moon,
-  ImageOff
+  ImageOff,
+  Image as ImageIcon,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { AdminHealthReport } from './AdminHealthReport';
 import type { BackgroundImportJob } from '@/src/lib/background-importer';
@@ -154,6 +157,10 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [isUpdatingAdultSetting, setIsUpdatingAdultSetting] = useState<boolean>(false);
   const [adultSettingNotice, setAdultSettingNotice] = useState<string>('');
 
+  // User Group Updates Control State (Master Admin Switch)
+  const [allowUserGroupUpdates, setAllowUserGroupUpdates] = useState<boolean>(true);
+  const [isUpdatingUserUpdatesSetting, setIsUpdatingUserUpdatesSetting] = useState<boolean>(false);
+
   const fetchContentSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/content-settings', {
@@ -165,6 +172,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         const data = await res.json();
         if (data.success && data.settings) {
           setHideAdultContent(Boolean(data.settings.hideAdultContent));
+          setAllowUserGroupUpdates(data.settings.allowUserGroupUpdates !== false);
         }
       }
     } catch {}
@@ -201,6 +209,33 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       alert(err.message || 'Network error updating settings');
     } finally {
       setIsUpdatingAdultSetting(false);
+    }
+  };
+
+  const handleToggleUserGroupUpdates = async (newAllowedValue: boolean) => {
+    setIsUpdatingUserUpdatesSetting(true);
+    setAdultSettingNotice('');
+    try {
+      const res = await fetch('/api/admin/content-settings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAdminAuthHeaders()
+        },
+        body: JSON.stringify({ allowUserGroupUpdates: newAllowedValue })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAllowUserGroupUpdates(Boolean(data.settings.allowUserGroupUpdates));
+        setAdultSettingNotice(data.message || 'User update permissions updated!');
+        setTimeout(() => setAdultSettingNotice(''), 6000);
+      } else {
+        alert(data.error || 'Failed to update user update permissions');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Network error updating permissions');
+    } finally {
+      setIsUpdatingUserUpdatesSetting(false);
     }
   };
 
@@ -765,6 +800,78 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       alert(`✅ Image removed for "${group.title}". Category fallback avatar active.`);
     } catch (err: any) {
       alert(`Failed to remove group image: ${err.message || 'Server error'}`);
+    }
+  };
+
+  const handleChangeGroupImage = async (group: Group) => {
+    if (!group || !group.id) return;
+    const currentImg = group.imageUrl || '';
+    const newUrl = prompt(
+      `Enter new image URL or base64 data for "${group.title}".\nIt will be resized to 150x150 WebP and uploaded to Cloudflare R2 (cdn.grouplinks.app):`,
+      currentImg.includes('cdn.grouplinks.app') ? currentImg : ''
+    );
+    if (!newUrl || !newUrl.trim() || newUrl.trim() === currentImg) return;
+
+    try {
+      const headers = getAdminAuthHeaders();
+      const res = await fetch('/api/admin/rescrape', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({
+          groupId: group.id,
+          action: 'change_image',
+          newImageUrl: newUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(`Failed to update image: ${data.error || 'Server error'}`);
+        return;
+      }
+      if (data.updatedGroup) {
+        setAdminGroups(prev => prev.map(item => item.id === group.id ? data.updatedGroup : item));
+        await onUpdateGroup(data.updatedGroup);
+        alert(`✅ Group image updated & uploaded to Cloudflare R2 for "${group.title}"!`);
+      }
+    } catch (err: any) {
+      alert(`Error updating image: ${err.message || 'Network error'}`);
+    }
+  };
+
+  const handleToggleGroupLock = async (group: Group) => {
+    if (!group || !group.id) return;
+    const currentLocked = Boolean(group.isUpdateLocked);
+    const newLock = !currentLocked;
+
+    try {
+      const headers = getAdminAuthHeaders();
+      const res = await fetch('/api/admin/rescrape', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({
+          groupId: group.id,
+          action: 'toggle_lock',
+          isUpdateLocked: newLock,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(`Failed to toggle lock: ${data.error || 'Server error'}`);
+        return;
+      }
+      if (data.updatedGroup) {
+        setAdminGroups(prev => prev.map(item => item.id === group.id ? data.updatedGroup : item));
+        await onUpdateGroup(data.updatedGroup);
+        alert(data.message || (newLock ? '🔒 Group updates locked' : '🔓 Group updates unlocked'));
+      }
+    } catch (err: any) {
+      alert(`Error: ${err.message || 'Network error'}`);
     }
   };
 
@@ -2599,6 +2706,55 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
               </div>
             </div>
 
+            {/* User Group Updates Control Banner */}
+            <div className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+              allowUserGroupUpdates
+                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-950 dark:text-indigo-100'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-100'
+            }`}>
+              <div className="flex items-start sm:items-center gap-3">
+                <div className={`p-2.5 rounded-xl shrink-0 ${allowUserGroupUpdates ? 'bg-indigo-600 text-white' : 'bg-amber-600 text-white'}`}>
+                  {allowUserGroupUpdates ? <RefreshCw className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-xs sm:text-sm">
+                      {allowUserGroupUpdates
+                        ? '👥 Community Updates by Visitors & Members: ENABLED (1 Time / Week Cooldown)'
+                        : '🔒 Community Updates by Visitors & Members: DISABLED (Master Admin Only)'}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      allowUserGroupUpdates ? 'bg-indigo-600 text-white' : 'bg-amber-600 text-white'
+                    }`}>
+                      {allowUserGroupUpdates ? 'Public 1/Week' : 'Admin Locked'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] opacity-80 mt-0.5 max-w-2xl leading-relaxed">
+                    {allowUserGroupUpdates
+                      ? 'Users and visitors can update existing listings at most once per week. Master admins can update anytime, change images, or refetch details.'
+                      : 'All user/visitor updates are blocked site-wide. Only the master admin can update groups, change group images, or refetch metadata.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  disabled={isUpdatingUserUpdatesSetting}
+                  onClick={() => handleToggleUserGroupUpdates(!allowUserGroupUpdates)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-sm ${
+                    allowUserGroupUpdates
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                  }`}
+                >
+                  {isUpdatingUserUpdatesSetting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {allowUserGroupUpdates ? <Lock className="w-3.5 h-3.5" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  <span>{allowUserGroupUpdates ? 'Disable User Updates' : 'Enable User Updates (1/Week)'}</span>
+                </button>
+              </div>
+            </div>
+
             {adultSettingNotice && (
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2">
                 <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -3185,6 +3341,26 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
                                   type="button"
+                                  onClick={() => handleChangeGroupImage(g)}
+                                  title="Change Image (Upload to Cloudflare R2 / cdn.grouplinks.app)"
+                                  className="p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900 border border-teal-200 dark:border-teal-800 transition-colors cursor-pointer"
+                                >
+                                  <ImageIcon className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleGroupLock(g)}
+                                  title={g.isUpdateLocked ? 'Updates Locked for Users (Click to Unlock)' : 'Updates Allowed for Users (Click to Lock)'}
+                                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                                    g.isUpdateLocked
+                                      ? 'bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-200 border-rose-300 dark:border-rose-700'
+                                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:text-amber-600 border border-neutral-200 dark:border-neutral-700'
+                                  }`}
+                                >
+                                  {g.isUpdateLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleRemoveGroupImage(g)}
                                   title="Remove Group Image (Revert to Category Default)"
                                   className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900 border border-rose-200 dark:border-rose-800 transition-colors cursor-pointer"
@@ -3195,7 +3371,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
                                   type="button"
                                   onClick={() => handleForceRescrapeGroup(g)}
                                   disabled={rescrapingGroupId === g.id}
-                                  title="Force Re-scrape Metadata & Icon Live"
+                                  title="Refetch Details & Icon Live (Scrape from Invite Link)"
                                   className="p-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer disabled:opacity-50"
                                 >
                                   <RefreshCw className={`w-3.5 h-3.5 ${rescrapingGroupId === g.id ? 'animate-spin text-indigo-600' : ''}`} />

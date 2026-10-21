@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findDuplicateGroupInDb, getGroupsDatabase } from '@/src/lib/groups-dal';
 import { checkDuplicateCommunity } from '@/src/utils/helpers';
 import { Platform } from '@/src/types';
+import { isUserGroupUpdatesAllowed, getUserUpdateCooldownMs } from '@/src/lib/content-settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,12 +25,47 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ isDuplicate: false });
     }
 
+    const userUpdatesAllowed = isUserGroupUpdatesAllowed();
+    const cooldownMs = getUserUpdateCooldownMs();
+
+    const computeUpdateStatus = (g: any) => {
+      const isLocked = Boolean(g.isUpdateLocked || g.allowUserUpdates === false || !userUpdatesAllowed);
+      const lastUserUpdatedTime = g.lastUserUpdatedAt
+        ? new Date(g.lastUserUpdatedAt).getTime()
+        : (g.updatedAt ? new Date(g.updatedAt).getTime() : 0);
+      const timeSinceLastUpdate = Date.now() - lastUserUpdatedTime;
+      const isUnderCooldown = lastUserUpdatedTime > 0 && timeSinceLastUpdate < cooldownMs;
+
+      let updateBlockedReason: string | null = null;
+      if (isLocked) {
+        updateBlockedReason = '🔒 Community updates by visitors or members are currently disabled by administration.';
+      } else if (isUnderCooldown) {
+        const remainingMs = cooldownMs - timeSinceLastUpdate;
+        const days = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+        const hours = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+        const timeStr = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+        updateBlockedReason = `⏳ Update Cooldown Active: Community updates are limited to 1 time per week. Next update available in ${timeStr}.`;
+      }
+
+      return {
+        canUserUpdate: !isLocked && !isUnderCooldown,
+        isUpdateLocked: isLocked,
+        isUnderCooldown,
+        updateBlockedReason,
+        lastUserUpdatedAt: g.lastUserUpdatedAt || g.updatedAt,
+      };
+    };
+
     // 1. Fast direct MySQL query for exact URL/title match (0ms latency, zero cache overhead)
     const directMatch = await findDuplicateGroupInDb(cleanUrl, cleanTitle, currentId);
     if (directMatch) {
+      const status = computeUpdateStatus(directMatch);
       return NextResponse.json({
         isDuplicate: true,
         reason: `This community invite link is already listed as "${directMatch.title}".`,
+        canUserUpdate: status.canUserUpdate,
+        isUpdateLocked: status.isUpdateLocked,
+        updateBlockedReason: status.updateBlockedReason,
         matchedGroup: {
           id: directMatch.id,
           title: directMatch.title,
@@ -45,6 +81,11 @@ export async function GET(req: NextRequest) {
           rulesSummary: directMatch.rulesSummary,
           memberCount: directMatch.memberCount,
           customTags: directMatch.customTags,
+          updatedAt: directMatch.updatedAt,
+          lastUserUpdatedAt: directMatch.lastUserUpdatedAt,
+          isUpdateLocked: directMatch.isUpdateLocked,
+          canUserUpdate: status.canUserUpdate,
+          updateBlockedReason: status.updateBlockedReason,
         },
       });
     }
@@ -58,9 +99,13 @@ export async function GET(req: NextRequest) {
 
     if (result.isDuplicate && result.matchedGroup) {
       const g = result.matchedGroup;
+      const status = computeUpdateStatus(g);
       return NextResponse.json({
         isDuplicate: true,
         reason: result.reason,
+        canUserUpdate: status.canUserUpdate,
+        isUpdateLocked: status.isUpdateLocked,
+        updateBlockedReason: status.updateBlockedReason,
         matchedGroup: {
           id: g.id,
           title: g.title,
@@ -76,6 +121,11 @@ export async function GET(req: NextRequest) {
           rulesSummary: g.rulesSummary,
           memberCount: g.memberCount,
           customTags: g.customTags,
+          updatedAt: g.updatedAt,
+          lastUserUpdatedAt: g.lastUserUpdatedAt,
+          isUpdateLocked: g.isUpdateLocked,
+          canUserUpdate: status.canUserUpdate,
+          updateBlockedReason: status.updateBlockedReason,
         },
       });
     }

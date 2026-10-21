@@ -10,7 +10,7 @@ import { resolveValidGroupImage } from '@/src/utils/categoryImages';
 import { scrapeGroupMetadataDirect, normalizePlatformUrl } from '@/src/lib/metadata-scraper';
 import { Group, Platform } from '@/src/types';
 import { revalidatePath } from 'next/cache';
-import { isAdultContentHidden } from '@/src/lib/content-settings';
+import { isAdultContentHidden, isUserGroupUpdatesAllowed, getUserUpdateCooldownMs } from '@/src/lib/content-settings';
 import { uploadImageToR2 } from '@/src/lib/r2-storage';
 
 export interface SubmitGroupInput {
@@ -243,26 +243,48 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
   }
 
   if (targetGroup) {
-    // 24-Hour Group Update Restriction Rule:
-    // When a user has updated any group, allow it to be updated again after 24 hours only.
-    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-    const lastUpdatedAt = targetGroup.updatedAt ? new Date(targetGroup.updatedAt).getTime() : 0;
-    const timeSinceLastUpdate = Date.now() - lastUpdatedAt;
-
     const isBypass = Boolean(input.bypassCooldown || input.forceUpdate || input.isAdmin);
-    if (!isBypass && lastUpdatedAt > 0 && timeSinceLastUpdate < TWENTY_FOUR_HOURS_MS) {
-      const remainingMs = TWENTY_FOUR_HOURS_MS - timeSinceLastUpdate;
-      const hoursRemaining = Math.floor(remainingMs / (60 * 60 * 1000));
-      const minutesRemaining = Math.ceil((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
-      const timeStr = hoursRemaining > 0 
-        ? `${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''} and ${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`
-        : `${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`;
 
-      console.warn(`[SubmitGroupAction] Group ${targetGroup.id} was updated ${Math.round(timeSinceLastUpdate / 60000)} mins ago. 24h cooldown active.`);
+    // 1. Master admin disable check: ensure updates from users/visitors are currently allowed
+    if (!isBypass) {
+      if (!isUserGroupUpdatesAllowed() || targetGroup.allowUserUpdates === false || targetGroup.isUpdateLocked) {
+        return {
+          success: false,
+          error: '🔒 Community updates by visitors or members are currently disabled by administration.',
+          diagnosticStep: 'USER_UPDATES_DISABLED',
+          group: targetGroup,
+        };
+      }
+    }
+
+    // 2. 1-Week (7-day) Group Update Restriction Rule:
+    // When a user has updated any group, allow it to be updated again after 1 week only.
+    const cooldownMs = getUserUpdateCooldownMs(); // Defaults to 7 days
+    const lastUserUpdatedTime = targetGroup.lastUserUpdatedAt
+      ? new Date(targetGroup.lastUserUpdatedAt).getTime()
+      : (targetGroup.updatedAt ? new Date(targetGroup.updatedAt).getTime() : 0);
+    const timeSinceLastUpdate = Date.now() - lastUserUpdatedTime;
+
+    if (!isBypass && lastUserUpdatedTime > 0 && timeSinceLastUpdate < cooldownMs) {
+      const remainingMs = cooldownMs - timeSinceLastUpdate;
+      const daysRemaining = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+      const hoursRemaining = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+      const minutesRemaining = Math.ceil((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+
+      let timeStr = '';
+      if (daysRemaining > 0) {
+        timeStr = `${daysRemaining} day${daysRemaining > 1 ? 's' : ''} and ${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''}`;
+      } else if (hoursRemaining > 0) {
+        timeStr = `${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''} and ${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`;
+      } else {
+        timeStr = `${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`;
+      }
+
+      console.warn(`[SubmitGroupAction] Group ${targetGroup.id} was updated ${Math.round(timeSinceLastUpdate / 60000)} mins ago. 1-week cooldown active.`);
       return {
         success: false,
-        error: `⏳ Update Cooldown Active: This community was updated recently. Community details can only be refreshed once every 24 hours. Please try again in ${timeStr}.`,
-        diagnosticStep: '24_HOUR_UPDATE_COOLDOWN',
+        error: `⏳ Update Cooldown Active: Listed communities can only be updated 1 time per week. Next available update in ${timeStr}.`,
+        diagnosticStep: '1_WEEK_UPDATE_COOLDOWN',
         retryAfterHours: Math.ceil(remainingMs / (60 * 60 * 1000)),
         group: targetGroup,
       };
@@ -303,6 +325,7 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
       metadataFetchError: fetchedMetadata?.metadataFetchError || null,
       normalizedUrl,
       platformHandle: norm.platformHandle || targetGroup.platformHandle,
+      lastUserUpdatedAt: input.isAdmin ? targetGroup.lastUserUpdatedAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
 

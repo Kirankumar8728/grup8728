@@ -22,12 +22,20 @@ interface R2UploadResult {
 
 let s3ClientInstance: S3Client | null = null;
 
-function getR2Client(): { client: S3Client; bucket: string; publicDomain: string } | null {
+export function isR2Configured(): boolean {
+  return Boolean(
+    process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID &&
+    process.env.R2_SECRET_ACCESS_KEY
+  );
+}
+
+export function getR2Client(): { client: S3Client; bucket: string; publicDomain: string } | null {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
   const bucket = process.env.R2_BUCKET_NAME || 'grouplinks-assets';
-  let publicDomain = process.env.R2_PUBLIC_DOMAIN || '';
+  let publicDomain = process.env.R2_PUBLIC_DOMAIN || 'https://cdn.grouplinks.app';
 
   if (!accountId || !accessKeyId || !secretAccessKey) {
     return null;
@@ -52,12 +60,13 @@ function getR2Client(): { client: S3Client; bucket: string; publicDomain: string
 }
 
 /**
- * Downloads image from remote URL or Base64 data URI, heavily resizes & compresses it
- * to 150x150 WebP format for fair use compliance, and uploads to Cloudflare R2.
+ * Downloads image from remote URL or Base64/SVG data URI, heavily resizes & compresses it
+ * to 150x150 WebP format for fair use compliance, and uploads to Cloudflare R2 (cdn.grouplinks.app).
  */
 export async function uploadImageToR2(
   sourceImageUrl: string,
-  imageKeyPrefix: string = 'group-icon'
+  imageKeyPrefix: string = 'group-icon',
+  customExactKey?: string
 ): Promise<R2UploadResult> {
   const r2 = getR2Client();
   if (!r2) {
@@ -77,9 +86,15 @@ export async function uploadImageToR2(
     let inputBuffer: Buffer;
 
     if (cleanUrl.startsWith('data:image/')) {
-      const base64Data = cleanUrl.split(',')[1];
-      if (!base64Data) throw new Error('Invalid base64 data URI');
-      inputBuffer = Buffer.from(base64Data, 'base64');
+      if (cleanUrl.includes(';base64,')) {
+        const base64Data = cleanUrl.split(';base64,')[1];
+        if (!base64Data) throw new Error('Invalid base64 data URI');
+        inputBuffer = Buffer.from(base64Data, 'base64');
+      } else {
+        const rawPart = cleanUrl.split(',')[1];
+        if (!rawPart) throw new Error('Invalid data URI payload');
+        inputBuffer = Buffer.from(decodeURIComponent(rawPart), 'utf-8');
+      }
     } else {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -117,7 +132,7 @@ export async function uploadImageToR2(
       .toBuffer();
 
     const sanitizePrefix = imageKeyPrefix.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 40);
-    const uniqueKey = `icons/${sanitizePrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.webp`;
+    const uniqueKey = customExactKey || `icons/${sanitizePrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.webp`;
 
     await r2.client.send(
       new PutObjectCommand({

@@ -13,7 +13,9 @@ export async function register() {
       (Array.isArray(process.argv) && process.argv.some(arg => arg && arg.includes('build'))) ||
       process.env.npm_lifecycle_event === 'build';
 
-    if (!isBuildPhase) {
+    const isDev = process.env.NODE_ENV === 'development';
+
+    if (!isBuildPhase && !isDev) {
       try {
         const { startKeepAlive } = await import('@/src/lib/keepalive');
         startKeepAlive();

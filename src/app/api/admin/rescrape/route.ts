@@ -28,19 +28,21 @@ export async function POST(req: NextRequest) {
       return rateLimitResponse(rateCheck.retryAfterSeconds, 'Too many metadata re-scrape requests. Please wait.');
     }
 
-    // 3. Extract target groupId / id / slug
-    let groupId = '';
+    // 3. Extract target groupId / id / slug & requested action
+    let body: any = {};
     try {
-      const body = await req.json();
-      groupId = body.groupId || body.id || body.slug || '';
+      body = await req.json();
     } catch {
       // Body parsing fallback
     }
 
+    let groupId = body.groupId || body.id || body.slug || '';
     if (!groupId) {
       const url = new URL(req.url);
       groupId = url.searchParams.get('groupId') || url.searchParams.get('id') || url.searchParams.get('slug') || '';
     }
+
+    const action = body.action || req.nextUrl?.searchParams?.get('action') || 'rescrape';
 
     if (!groupId) {
       return NextResponse.json(
@@ -58,6 +60,101 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A. Handle Toggle Lock (Disable / Enable updates from visitors or users)
+    if (action === 'toggle_lock') {
+      const newLock = typeof body.isUpdateLocked === 'boolean'
+        ? body.isUpdateLocked
+        : !Boolean(existingGroup.isUpdateLocked);
+
+      const updates = {
+        isUpdateLocked: newLock,
+        allowUserUpdates: !newLock,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const updatedGroup = await updateGroup(existingGroup.id, updates);
+      try {
+        clearGroupsFromRam();
+        clearGroupsDalCache();
+        revalidatePath('/', 'layout');
+        revalidatePath('/');
+        if (existingGroup.platform) revalidatePath(`/${existingGroup.platform}`);
+        if (existingGroup.slug) revalidatePath(`/group/${existingGroup.slug}`);
+      } catch {}
+
+      logAdminAction(
+        ADMIN_EMAIL || 'admin',
+        'TOGGLE_GROUP_LOCK',
+        'group',
+        existingGroup.id,
+        { previousLocked: existingGroup.isUpdateLocked, newLock },
+        req
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: newLock ? '🔒 Community updates disabled for visitors' : '🔓 Community updates enabled for visitors',
+        groupId: existingGroup.id,
+        isUpdateLocked: newLock,
+        updatedGroup: updatedGroup || { ...existingGroup, ...updates },
+      });
+    }
+
+    // B. Handle Change Image (Custom image URL or base64 upload to Cloudflare R2 / cdn.grouplinks.app)
+    if (action === 'change_image') {
+      const newImageUrl = (body.newImageUrl || body.imageUrl || '').trim();
+      if (!newImageUrl) {
+        return NextResponse.json(
+          { success: false, error: 'New image URL or data payload is required.' },
+          { status: 400 }
+        );
+      }
+
+      let finalImg = newImageUrl;
+      try {
+        const r2Res = await uploadImageToR2(newImageUrl, existingGroup.title || 'group-icon');
+        if (r2Res.success && r2Res.r2Url) {
+          finalImg = r2Res.r2Url;
+        }
+      } catch (err) {
+        console.warn('[ADMIN CHANGE IMAGE] R2 upload notice:', err);
+      }
+
+      const updates = {
+        imageUrl: finalImg,
+        bannerUrl: finalImg,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const updatedGroup = await updateGroup(existingGroup.id, updates);
+      try {
+        clearGroupsFromRam();
+        clearGroupsDalCache();
+        revalidatePath('/', 'layout');
+        revalidatePath('/');
+        if (existingGroup.platform) revalidatePath(`/${existingGroup.platform}`);
+        if (existingGroup.slug) revalidatePath(`/group/${existingGroup.slug}`);
+      } catch {}
+
+      logAdminAction(
+        ADMIN_EMAIL || 'admin',
+        'ADMIN_CHANGE_IMAGE',
+        'group',
+        existingGroup.id,
+        { oldImage: existingGroup.imageUrl, newImage: finalImg },
+        req
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: `Group image updated & uploaded to ${finalImg.includes('cdn.grouplinks.app') ? 'cdn.grouplinks.app' : 'storage'}.`,
+        groupId: existingGroup.id,
+        imageUrl: finalImg,
+        updatedGroup: updatedGroup || { ...existingGroup, ...updates },
+      });
+    }
+
+    // C. Handle Live Re-fetch Details (Scrape fresh metadata & icon)
     if (!existingGroup.url) {
       return NextResponse.json(
         { success: false, error: 'Target group does not have a valid invite URL to re-scrape.' },

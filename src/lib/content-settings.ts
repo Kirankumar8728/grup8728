@@ -6,6 +6,8 @@ import { DEFAULT_RESTRICTED_KEYWORDS } from '@/src/utils/moderation';
 export interface ContentSettings {
   hideAdultContent: boolean;
   substitutionCategory: string;
+  allowUserGroupUpdates: boolean; // Master admin toggle to enable/disable user group updates
+  userUpdateCooldownDays: number; // 7 days (1 update per week)
   updatedAt: string;
   updatedBy: string;
 }
@@ -22,6 +24,8 @@ const DEFAULT_SETTINGS: ContentSettings = {
   // Default to false so adult groups are visible by default while allowing users/admins to toggle hiding
   hideAdultContent: false,
   substitutionCategory: 'Tech & Programming',
+  allowUserGroupUpdates: true, // Visitors & users allowed by default unless restricted by admin
+  userUpdateCooldownDays: 7, // Users can only update once per week
   updatedAt: new Date().toISOString(),
   updatedBy: 'system',
 };
@@ -49,6 +53,8 @@ function loadSettingsFromDisk(): ContentSettings {
     return {
       hideAdultContent: typeof parsed.hideAdultContent === 'boolean' ? parsed.hideAdultContent : DEFAULT_SETTINGS.hideAdultContent,
       substitutionCategory: typeof parsed.substitutionCategory === 'string' ? parsed.substitutionCategory : DEFAULT_SETTINGS.substitutionCategory,
+      allowUserGroupUpdates: typeof parsed.allowUserGroupUpdates === 'boolean' ? parsed.allowUserGroupUpdates : DEFAULT_SETTINGS.allowUserGroupUpdates,
+      userUpdateCooldownDays: typeof parsed.userUpdateCooldownDays === 'number' && parsed.userUpdateCooldownDays > 0 ? parsed.userUpdateCooldownDays : DEFAULT_SETTINGS.userUpdateCooldownDays,
       updatedAt: parsed.updatedAt || new Date().toISOString(),
       updatedBy: parsed.updatedBy || 'system',
     };
@@ -111,6 +117,39 @@ export function setAdultContentHidden(hidden: boolean, updatedBy = 'admin'): boo
     updatedBy,
   });
   return hidden;
+}
+
+/**
+ * Checks whether user/visitor community updates are globally permitted.
+ */
+export function isUserGroupUpdatesAllowed(): boolean {
+  return getContentSettings().allowUserGroupUpdates;
+}
+
+/**
+ * Convenience setter for global user/visitor community updates allowed state.
+ */
+export function setUserGroupUpdatesAllowed(allowed: boolean, updatedBy = 'admin'): boolean {
+  updateContentSettings({
+    allowUserGroupUpdates: allowed,
+    updatedBy,
+  });
+  return allowed;
+}
+
+/**
+ * Returns the cooldown duration in days (default: 7 days, 1 update per week).
+ */
+export function getUserUpdateCooldownDays(): number {
+  return getContentSettings().userUpdateCooldownDays || 7;
+}
+
+/**
+ * Returns the cooldown duration in milliseconds (default: 7 * 24 * 60 * 60 * 1000 = 604,800,000 ms).
+ */
+export function getUserUpdateCooldownMs(): number {
+  const days = getUserUpdateCooldownDays();
+  return days * 24 * 60 * 60 * 1000;
 }
 
 /**

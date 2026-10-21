@@ -9,7 +9,7 @@ import { resolveAuthContext } from '@/src/lib/auth-helpers';
 import { requireAdmin } from '@/src/lib/admin-auth';
 import { checkRateLimit, rateLimitResponse } from '@/src/lib/rate-limit';
 import { REALTIME_NO_CACHE_HEADERS } from '@/src/lib/cache-control';
-import { isAdultContentHidden } from '@/src/lib/content-settings';
+import { isAdultContentHidden, isUserGroupUpdatesAllowed, getUserUpdateCooldownMs } from '@/src/lib/content-settings';
 import { uploadImageToR2 } from '@/src/lib/r2-storage';
 
 export const dynamic = 'force-dynamic';
@@ -300,25 +300,42 @@ export async function POST(req: NextRequest) {
     }
 
     if (targetGroup) {
-      // 24-Hour Group Update Restriction Rule:
-      // When a user has updated any group, allow it to be updated again after 24 hours only.
-      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-      const lastUpdatedAt = targetGroup.updatedAt ? new Date(targetGroup.updatedAt).getTime() : 0;
-      const timeSinceLastUpdate = Date.now() - lastUpdatedAt;
+      // 1. Master admin disable check for non-admin users
+      if (!auth.isAdmin) {
+        if (!isUserGroupUpdatesAllowed() || targetGroup.allowUserUpdates === false || targetGroup.isUpdateLocked) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: '🔒 Community updates by visitors or members are currently disabled by administration.',
+              group: targetGroup,
+            },
+            { status: 403, headers: REALTIME_NO_CACHE_HEADERS }
+          );
+        }
+      }
+
+      // 2. 1-Week (7-day) Group Update Restriction Rule:
+      // When a user has updated any group, allow it to be updated again after 1 week only.
+      const cooldownMs = getUserUpdateCooldownMs();
+      const lastUserUpdatedTime = targetGroup.lastUserUpdatedAt
+        ? new Date(targetGroup.lastUserUpdatedAt).getTime()
+        : (targetGroup.updatedAt ? new Date(targetGroup.updatedAt).getTime() : 0);
+      const timeSinceLastUpdate = Date.now() - lastUserUpdatedTime;
 
       const isBypass = Boolean(auth.isAdmin || body.forceUpdate || body.bypassCooldown);
-      if (!isBypass && lastUpdatedAt > 0 && timeSinceLastUpdate < TWENTY_FOUR_HOURS_MS) {
-        const remainingMs = TWENTY_FOUR_HOURS_MS - timeSinceLastUpdate;
-        const hoursRemaining = Math.floor(remainingMs / (60 * 60 * 1000));
+      if (!isBypass && lastUserUpdatedTime > 0 && timeSinceLastUpdate < cooldownMs) {
+        const remainingMs = cooldownMs - timeSinceLastUpdate;
+        const daysRemaining = Math.floor(remainingMs / (24 * 60 * 60 * 1000));
+        const hoursRemaining = Math.floor((remainingMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
         const minutesRemaining = Math.ceil((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
-        const timeStr = hoursRemaining > 0 
-          ? `${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''} and ${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`
-          : `${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`;
+        const timeStr = daysRemaining > 0 
+          ? `${daysRemaining} day${daysRemaining > 1 ? 's' : ''} and ${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''}`
+          : (hoursRemaining > 0 ? `${hoursRemaining} hour${hoursRemaining > 1 ? 's' : ''} and ${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}` : `${minutesRemaining} minute${minutesRemaining > 1 ? 's' : ''}`);
 
         return NextResponse.json(
           {
             success: false,
-            error: `⏳ Update Cooldown Active: This community was updated recently. Community details can only be refreshed once every 24 hours. Please try again in ${timeStr}.`,
+            error: `⏳ Update Cooldown Active: Listed communities can only be updated 1 time per week. Next available update in ${timeStr}.`,
             retryAfterHours: Math.ceil(remainingMs / (60 * 60 * 1000)),
             group: targetGroup,
           },
@@ -355,6 +372,7 @@ export async function POST(req: NextRequest) {
         normalizedUrl,
         platformHandle: norm.platformHandle || targetGroup.platformHandle,
         authorName: cleanAuthor || targetGroup.authorName,
+        lastUserUpdatedAt: auth.isAdmin ? targetGroup.lastUserUpdatedAt : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       } as any);
 

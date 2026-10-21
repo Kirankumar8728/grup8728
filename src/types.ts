@@ -101,6 +101,9 @@ export interface Group {
   fallbackMetadata?: boolean;
   lastMetadataFetchAt?: string;
   metadataFetchError?: string | null;
+  allowUserUpdates?: boolean; // Whether users/visitors can update this group (admin toggle)
+  isUpdateLocked?: boolean; // Master admin lock flag to disable user/visitor updates
+  lastUserUpdatedAt?: string; // ISO timestamp of the last time a user/visitor updated this group (for 1-week cooldown)
 }
 
 

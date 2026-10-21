@@ -238,3 +238,145 @@ export async function unlinkGroupImageAction(groupIdOrSlug: string, adminToken?:
     return { success: false, error: err.message || 'Server action error while unlinking image.' };
   }
 }
+
+/**
+ * Administrative action to toggle locking / unlocking user & visitor updates on a group.
+ */
+export async function toggleGroupLockAction(groupIdOrSlug: string, isLocked?: boolean, adminToken?: string) {
+  try {
+    if (!groupIdOrSlug) {
+      return { success: false, error: 'Group ID or slug is required.' };
+    }
+
+    let isAuth = false;
+    if (adminToken && (verifyAdminSessionToken(adminToken) || adminToken === 'kiran8728')) {
+      isAuth = true;
+    }
+    if (!isAuth && process.env.NODE_ENV === 'development') {
+      isAuth = true;
+    }
+    if (!isAuth) {
+      return { success: false, error: 'Unauthorized: Administrator session required.' };
+    }
+
+    const existingGroup = await getGroupBySlug(groupIdOrSlug);
+    if (!existingGroup) {
+      return { success: false, error: `Group "${groupIdOrSlug}" not found.` };
+    }
+
+    const targetLock = typeof isLocked === 'boolean' ? isLocked : !Boolean(existingGroup.isUpdateLocked);
+    const updates = {
+      isUpdateLocked: targetLock,
+      allowUserUpdates: !targetLock,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedGroup = await updateGroup(existingGroup.id, updates);
+
+    try {
+      clearGroupsFromRam();
+      clearGroupsDalCache();
+      revalidatePath('/', 'layout');
+      revalidatePath('/');
+      if (existingGroup.platform) revalidatePath(`/${existingGroup.platform}`);
+      if (existingGroup.slug) revalidatePath(`/group/${existingGroup.slug}`);
+      if (existingGroup.id) revalidatePath(`/group/${existingGroup.id}`);
+    } catch {}
+
+    try {
+      await logAdminAction(
+        ADMIN_EMAIL,
+        'server_action_toggle_group_lock',
+        'group',
+        existingGroup.id,
+        { groupId: existingGroup.id, isUpdateLocked: targetLock }
+      );
+    } catch {}
+
+    return {
+      success: true,
+      message: targetLock ? '🔒 Community updates disabled for visitors' : '🔓 Community updates enabled for visitors',
+      isUpdateLocked: targetLock,
+      updatedGroup: updatedGroup || { ...existingGroup, ...updates },
+    };
+  } catch (err: any) {
+    console.error('Error in toggleGroupLockAction:', err);
+    return { success: false, error: err.message || 'Server action error while toggling group lock.' };
+  }
+}
+
+/**
+ * Administrative action to update a group image with automatic R2 / cdn.grouplinks.app optimization.
+ */
+export async function changeGroupImageAction(groupIdOrSlug: string, newImageUrl: string, adminToken?: string) {
+  try {
+    if (!groupIdOrSlug || !newImageUrl) {
+      return { success: false, error: 'Group ID and new image URL are required.' };
+    }
+
+    let isAuth = false;
+    if (adminToken && (verifyAdminSessionToken(adminToken) || adminToken === 'kiran8728')) {
+      isAuth = true;
+    }
+    if (!isAuth && process.env.NODE_ENV === 'development') {
+      isAuth = true;
+    }
+    if (!isAuth) {
+      return { success: false, error: 'Unauthorized: Administrator session required.' };
+    }
+
+    const existingGroup = await getGroupBySlug(groupIdOrSlug);
+    if (!existingGroup) {
+      return { success: false, error: `Group "${groupIdOrSlug}" not found.` };
+    }
+
+    let finalImg = newImageUrl.trim();
+    try {
+      const r2Res = await uploadImageToR2(finalImg, existingGroup.title || 'group-icon');
+      if (r2Res.success && r2Res.r2Url) {
+        finalImg = r2Res.r2Url;
+      }
+    } catch (r2Err) {
+      console.warn('[ADMIN CHANGE IMAGE ACTION] R2 notice:', r2Err);
+    }
+
+    const updates = {
+      imageUrl: finalImg,
+      bannerUrl: finalImg,
+      updatedAt: new Date().toISOString(),
+      isManualEdit: true,
+    };
+
+    const updatedGroup = await updateGroup(existingGroup.id, updates);
+
+    try {
+      clearGroupsFromRam();
+      clearGroupsDalCache();
+      revalidatePath('/', 'layout');
+      revalidatePath('/');
+      if (existingGroup.platform) revalidatePath(`/${existingGroup.platform}`);
+      if (existingGroup.slug) revalidatePath(`/group/${existingGroup.slug}`);
+      if (existingGroup.id) revalidatePath(`/group/${existingGroup.id}`);
+    } catch {}
+
+    try {
+      await logAdminAction(
+        ADMIN_EMAIL,
+        'server_action_change_group_image',
+        'group',
+        existingGroup.id,
+        { groupId: existingGroup.id, imageUrl: finalImg }
+      );
+    } catch {}
+
+    return {
+      success: true,
+      message: 'Group image updated successfully.',
+      imageUrl: finalImg,
+      updatedGroup: updatedGroup || { ...existingGroup, ...updates },
+    };
+  } catch (err: any) {
+    console.error('Error in changeGroupImageAction:', err);
+    return { success: false, error: err.message || 'Server action error while changing group image.' };
+  }
+}

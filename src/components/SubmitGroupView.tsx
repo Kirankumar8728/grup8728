@@ -25,12 +25,14 @@ import {
   Trash2,
   Info,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  Lock
 } from 'lucide-react';
 import { Platform, Category, Language, Region, ScrapeMetadataResponse } from '../types';
 import { detectPlatformFromUrl, validateGroupUrl, ALLOWED_URL_RULES, PLATFORM_CONFIGS, CATEGORIES, GENERAL_CATEGORIES, LANGUAGES, REGIONS, calculateRankScore, calculateRankGrade, getGroupUrlPath, getCommunityFallbackAvatar, getCategoryFallbackImage, resolveValidGroupImage, cleanCommunityTitle, isGenericGroupTitle, isGenericGroupDescription } from '../utils/helpers';
 import { analyzeGroupContent } from '../utils/keywordFilter';
 import { checkGroupRestrictedContent } from '../utils/moderation';
+import { isUserAdminLoggedIn } from '../utils/adminAuth';
 import { PlatformIcon } from './PlatformIcon';
 import { Footer } from './Footer';
 import { Header } from './Header';
@@ -124,6 +126,9 @@ export const SubmitGroupView = () => {
   const [duplicateCheckResult, setDuplicateCheckResult] = useState<{
     isDuplicate: boolean;
     reason?: string;
+    canUserUpdate?: boolean;
+    isUpdateLocked?: boolean;
+    updateBlockedReason?: string;
     matchedGroup?: {
       id: string;
       title: string;
@@ -131,6 +136,9 @@ export const SubmitGroupView = () => {
       platform?: Platform;
       category?: string;
       url?: string;
+      isUpdateLocked?: boolean;
+      updateBlockedReason?: string;
+      canUserUpdate?: boolean;
     };
   } | null>(null);
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false);
@@ -879,53 +887,86 @@ export const SubmitGroupView = () => {
             )}
 
             {/* Duplicate Community Prevention Warning Banner with Update Action */}
-            {duplicateCheckResult?.isDuplicate && duplicateCheckResult.matchedGroup && (
-              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border-2 border-amber-500/80 text-xs text-amber-900 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md animate-in fade-in slide-in-from-top-1 duration-200">
-                <div className="flex items-start gap-3 min-w-0">
-                  <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                  <div>
-                    <div className="font-bold text-amber-950 dark:text-amber-100 text-sm flex items-center gap-1.5 flex-wrap">
-                      <span>Community Already Listed</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200">
-                        Update Available
-                      </span>
+            {duplicateCheckResult?.isDuplicate && duplicateCheckResult.matchedGroup && (() => {
+              const isAdmin = typeof window !== 'undefined' ? isUserAdminLoggedIn() : false;
+              const canUpdate = isAdmin || duplicateCheckResult.canUserUpdate !== false;
+              const isLocked = duplicateCheckResult.isUpdateLocked || duplicateCheckResult.matchedGroup.isUpdateLocked;
+              const blockedReason = duplicateCheckResult.updateBlockedReason || duplicateCheckResult.matchedGroup.updateBlockedReason;
+
+              return (
+                <div className={`p-4 rounded-2xl border-2 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md animate-in fade-in slide-in-from-top-1 duration-200 ${
+                  canUpdate
+                    ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-500/80 text-amber-900 dark:text-amber-200'
+                    : 'bg-rose-50 dark:bg-rose-950/40 border-rose-500/70 text-rose-900 dark:text-rose-200'
+                }`}>
+                  <div className="flex items-start gap-3 min-w-0">
+                    {canUpdate ? (
+                      <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    ) : (
+                      <Lock className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <div className="font-bold text-sm flex items-center gap-1.5 flex-wrap">
+                        <span className={canUpdate ? 'text-amber-950 dark:text-amber-100' : 'text-rose-950 dark:text-rose-100'}>
+                          Community Already Listed
+                        </span>
+                        {canUpdate ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-200">
+                            {isAdmin ? '👑 Admin Override' : 'Update Available'}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-rose-200 dark:bg-rose-900/80 text-rose-900 dark:text-rose-200 flex items-center gap-1">
+                            <Lock className="w-2.5 h-2.5" />
+                            {isLocked ? 'Updates Disabled' : '1-Week Cooldown'}
+                          </span>
+                        )}
+                      </div>
+                      <p className={`text-xs mt-0.5 leading-relaxed ${canUpdate ? 'text-amber-800/90 dark:text-amber-300/90' : 'text-rose-800/90 dark:text-rose-300/90'}`}>
+                        {blockedReason || duplicateCheckResult.reason || `This group is already listed on GroupLinks as "${duplicateCheckResult.matchedGroup.title}".`}
+                        {canUpdate && (
+                          <span className="block font-semibold text-indigo-700 dark:text-indigo-300 mt-0.5">
+                            You can update its details (title, description, category, tags, and icon) using the Update button below.
+                          </span>
+                        )}
+                      </p>
                     </div>
-                    <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5 leading-relaxed">
-                      {duplicateCheckResult.reason || `This group is already listed on GroupLinks as "${duplicateCheckResult.matchedGroup.title}".`}
-                      <span className="block font-semibold text-indigo-700 dark:text-indigo-300 mt-0.5">
-                        You can update its details (title, description, category, tags, and icon) using the Update button below.
-                      </span>
-                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateExistingGroup(duplicateCheckResult.matchedGroup)}
+                      disabled={isSubmitting || !canUpdate}
+                      title={!canUpdate ? (blockedReason || 'Updates are limited to once per week') : undefined}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                        canUpdate
+                          ? 'text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50'
+                          : 'text-neutral-400 bg-neutral-200 dark:bg-neutral-800 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      {isSubmitting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : canUpdate ? (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      ) : (
+                        <Lock className="w-3.5 h-3.5" />
+                      )}
+                      <span>{canUpdate ? 'Update Group' : 'Updates Locked'}</span>
+                    </button>
+
+                    <a
+                      href={getGroupUrlPath(duplicateCheckResult.matchedGroup as any)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 rounded-xl text-xs font-semibold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 shadow-2xs transition-all whitespace-nowrap flex items-center gap-1"
+                    >
+                      <span>View Group</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateExistingGroup(duplicateCheckResult.matchedGroup)}
-                    disabled={isSubmitting}
-                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 shadow-sm transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {isSubmitting ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    )}
-                    <span>Update Group</span>
-                  </button>
-
-                  <a
-                    href={getGroupUrlPath(duplicateCheckResult.matchedGroup as any)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-2 rounded-xl text-xs font-semibold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 shadow-2xs transition-all whitespace-nowrap flex items-center gap-1"
-                  >
-                    <span>View Group</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Update Success Banner */}
             {updateSuccessMessage && (
@@ -1691,26 +1732,39 @@ export const SubmitGroupView = () => {
             >
               Cancel
             </button>
-            {duplicateCheckResult?.isDuplicate && duplicateCheckResult.matchedGroup ? (
-              <button
-                type="button"
-                onClick={() => handleUpdateExistingGroup(duplicateCheckResult.matchedGroup)}
-                disabled={isSubmitting || !url.trim() || liveRestrictedCheck.isRestricted}
-                className="px-5 py-2.5 text-xs font-bold rounded-xl text-white bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-indigo-600/20 flex items-center gap-2 transition-all hover:scale-105 cursor-pointer"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Updating Community...</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-4 h-4" />
-                    <span>Update Existing Group</span>
-                  </>
-                )}
-              </button>
-            ) : (
+            {duplicateCheckResult?.isDuplicate && duplicateCheckResult.matchedGroup ? (() => {
+              const isAdmin = typeof window !== 'undefined' ? isUserAdminLoggedIn() : false;
+              const canUpdate = isAdmin || duplicateCheckResult.canUserUpdate !== false;
+              return (
+                <button
+                  type="button"
+                  onClick={() => handleUpdateExistingGroup(duplicateCheckResult.matchedGroup)}
+                  disabled={isSubmitting || !url.trim() || liveRestrictedCheck.isRestricted || !canUpdate}
+                  className={`px-5 py-2.5 text-xs font-bold rounded-xl text-white flex items-center gap-2 transition-all ${
+                    canUpdate
+                      ? 'bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 shadow-md shadow-indigo-600/20 hover:scale-105 cursor-pointer disabled:opacity-50'
+                      : 'bg-neutral-500 opacity-60 cursor-not-allowed'
+                  }`}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Updating Community...</span>
+                    </>
+                  ) : canUpdate ? (
+                    <>
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Update Existing Group</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-4 h-4" />
+                      <span>Updates Locked (1/week)</span>
+                    </>
+                  )}
+                </button>
+              );
+            })() : (
               <button
                 type="submit"
                 disabled={isSubmitting || !url.trim() || liveRestrictedCheck.isRestricted}

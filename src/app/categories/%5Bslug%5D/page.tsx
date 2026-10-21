@@ -19,7 +19,6 @@ export const revalidate = 60;
 
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
 export async function generateMetadata({ params }: CategoryPageProps): Promise<Metadata> {
@@ -44,9 +43,8 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
   });
 }
 
-export default async function CategoryHubPage({ params, searchParams }: CategoryPageProps) {
+export default async function CategoryHubPage({ params }: CategoryPageProps) {
   const { slug } = await params;
-  const { notice } = await searchParams;
   const resolution = resolveCategoryFromSlug(slug);
 
   if (!resolution) {
@@ -85,11 +83,6 @@ export default async function CategoryHubPage({ params, searchParams }: Category
 
   return (
     <>
-      {notice === 'expired' && (
-        <div className="bg-amber-100 border-l-4 border-amber-500 p-4 my-4 max-w-7xl mx-auto">
-          <p className="text-amber-700">⚠️ The community link you requested has expired or been removed. Browse active communities in this category below.</p>
-        </div>
-      )}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }}
