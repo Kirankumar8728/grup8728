@@ -20,6 +20,19 @@ if (typeof setInterval !== 'undefined') {
   }, 5 * 60 * 1000);
 }
 
+function isPrivateIp(ip: string): boolean {
+  if (!ip) return true;
+  const clean = ip.trim();
+  if (clean === '127.0.0.1' || clean === '::1' || clean === 'localhost') return true;
+  if (clean.startsWith('10.') || clean.startsWith('192.168.')) return true;
+  if (clean.startsWith('172.')) {
+    const parts = clean.split('.');
+    const second = parseInt(parts[1], 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+  return false;
+}
+
 export function getClientIp(req: NextRequest): string {
   // 1. Cloudflare True Client IP (highest priority on grouplinks.app)
   const cfIp = req.headers.get('cf-connecting-ip');
@@ -33,23 +46,27 @@ export function getClientIp(req: NextRequest): string {
     return realIp.trim();
   }
 
-  // 3. X-Forwarded-For (extract first non-internal client IP)
+  // 3. X-Forwarded-For (extract first non-internal public client IP)
   const forwardedFor = req.headers.get('x-forwarded-for');
   if (forwardedFor) {
     const ips = forwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
     if (ips.length > 0) {
+      const publicIp = ips.find(ip => !isPrivateIp(ip));
+      if (publicIp) return publicIp;
       return ips[0];
     }
   }
 
-  // 4. Fallback to User-Agent differentiation to avoid global 127.0.0.1 collision
+  // 4. Fallback to User-Agent + Accept-Language fingerprinting to avoid global 127.0.0.1 collision
   const ua = req.headers.get('user-agent') || 'unknown';
-  let uaHash = 0;
-  for (let i = 0; i < ua.length; i++) {
-    uaHash = ((uaHash << 5) - uaHash) + ua.charCodeAt(i);
-    uaHash |= 0;
+  const acceptLang = req.headers.get('accept-language') || 'en';
+  let hash = 0;
+  const combined = `${ua}|${acceptLang}`;
+  for (let i = 0; i < combined.length; i++) {
+    hash = ((hash << 5) - hash) + combined.charCodeAt(i);
+    hash |= 0;
   }
-  return `local-${Math.abs(uaHash)}`;
+  return `fp-${Math.abs(hash)}`;
 }
 
 export interface RateLimitOptions {
