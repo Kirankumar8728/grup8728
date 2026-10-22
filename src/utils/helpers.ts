@@ -1870,6 +1870,14 @@ export async function safeFetchJson(url: string, options?: RequestInit): Promise
   try {
     const res = await fetch(url, options);
     const text = await res.text();
+    if (!text || !text.trim()) {
+      return {
+        ok: res.ok,
+        status: res.status,
+        data: null,
+        error: res.ok ? undefined : `Request failed with status ${res.status} (empty response)`,
+      };
+    }
     let data: any = null;
     try {
       data = JSON.parse(text);

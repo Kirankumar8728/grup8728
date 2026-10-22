@@ -2226,7 +2226,7 @@ export async function scrapeGroupMetadataDirect(
     metadataSource,
     fallbackMetadata,
     lastMetadataFetchAt: new Date().toISOString(),
-    metadataFetchError: metadataFetchError || null,
+    ...(metadataFetchError ? { metadataFetchError } : {}),
   };
 
   SCRAPE_CACHE.set(targetUrl, { timestamp: Date.now(), data: result });

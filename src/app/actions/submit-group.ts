@@ -355,7 +355,7 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
       metadataSource: fetchedMetadata?.metadataSource || targetGroup.metadataSource || 'telegram',
       fallbackMetadata: Boolean(fetchedMetadata?.fallbackMetadata),
       lastMetadataFetchAt: fetchedMetadata?.lastMetadataFetchAt || new Date().toISOString(),
-      metadataFetchError: fetchedMetadata?.metadataFetchError || null,
+      ...(fetchedMetadata?.metadataFetchError ? { metadataFetchError: fetchedMetadata.metadataFetchError } : {}),
       normalizedUrl,
       platformHandle: norm.platformHandle || targetGroup.platformHandle,
       lastUserUpdatedAt: input.isAdmin ? targetGroup.lastUserUpdatedAt : new Date().toISOString(),
