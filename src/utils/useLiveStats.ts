@@ -11,21 +11,30 @@ export interface GroupStatItem {
 export function useLiveStats(groupIds: string[]) {
   const [statsMap, setStatsMap] = useState<Record<string, GroupStatItem>>({});
   const lastFetchedKeyRef = useRef<string>('');
+  const rateLimitCooldownRef = useRef<number>(0);
 
   const groupIdsKey = Array.isArray(groupIds) ? groupIds.slice(0, 50).sort().join(',') : '';
 
   const fetchStats = useCallback(async (key: string) => {
     if (!key) return;
+    if (Date.now() < rateLimitCooldownRef.current) return;
+
     const ids = key.split(',').filter(Boolean);
     if (ids.length === 0) return;
 
+    // Update lastFetchedKeyRef immediately when invoked to prevent repeat re-fetches
+    lastFetchedKeyRef.current = key;
+
     try {
       const res = await fetch(`/api/stats/batch?ids=${encodeURIComponent(ids.join(','))}`);
+      if (res.status === 429) {
+        rateLimitCooldownRef.current = Date.now() + 30000;
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.stats) {
           setStatsMap(prev => ({ ...prev, ...data.stats }));
-          lastFetchedKeyRef.current = key;
         }
       }
     } catch {}
@@ -35,13 +44,13 @@ export function useLiveStats(groupIds: string[]) {
     if (!groupIdsKey) return;
 
     // Fetch immediately if group list changed
-    if (groupIdsKey !== lastFetchedKeyRef.current) {
+    if (groupIdsKey !== lastFetchedKeyRef.current && Date.now() >= rateLimitCooldownRef.current) {
       fetchStats(groupIdsKey);
     }
 
     // 60-second background refresh only when tab is visible
     const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && Date.now() >= rateLimitCooldownRef.current) {
         fetchStats(groupIdsKey);
       }
     }, 60000);
@@ -69,4 +78,3 @@ export function useLiveStats(groupIds: string[]) {
 
   return { statsMap, optimisticallyIncrement, refetch: () => fetchStats(groupIdsKey) };
 }
-

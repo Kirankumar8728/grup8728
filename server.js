@@ -21,6 +21,9 @@ app.prepare().then(() => {
     }
   });
 
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
   });

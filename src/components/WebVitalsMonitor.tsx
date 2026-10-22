@@ -2,28 +2,20 @@
 
 import { useEffect } from 'react';
 
-function sendMetricToVitalsEndpoint(metric: {
-  id: string;
-  name: string;
-  value: number;
-  rating?: string;
-  delta?: number;
-  navigationType?: string;
-  path?: string;
-}) {
+let metricQueue: any[] = [];
+let debounceTimer: NodeJS.Timeout | null = null;
+
+function flushMetrics() {
+  if (metricQueue.length === 0) return;
+  const batch = [...metricQueue];
+  metricQueue = [];
+
   try {
-    const payload = {
-      id: metric.id,
-      name: metric.name,
-      value: Math.round(metric.name === 'CLS' ? metric.value * 1000 : metric.value) / (metric.name === 'CLS' ? 1000 : 1),
-      rating: metric.rating || 'good',
-      delta: metric.delta ? Math.round(metric.delta * 100) / 100 : metric.value,
-      navigationType: metric.navigationType,
+    const body = JSON.stringify({
+      batch,
       path: typeof window !== 'undefined' ? window.location.pathname : '/',
       timestamp: Date.now(),
-    };
-
-    const body = JSON.stringify(payload);
+    });
 
     if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
       const blob = new Blob([body], { type: 'application/json' });
@@ -39,14 +31,45 @@ function sendMetricToVitalsEndpoint(metric: {
       }).catch(() => {});
     }
   } catch {
-    // Non-blocking catch to guarantee zero interference with main thread
+    // Non-blocking catch
   }
 }
 
+function sendMetricToVitalsEndpoint(metric: {
+  id: string;
+  name: string;
+  value: number;
+  rating?: string;
+  delta?: number;
+  navigationType?: string;
+  path?: string;
+}) {
+  const payload = {
+    id: metric.id,
+    name: metric.name,
+    value: Math.round(metric.name === 'CLS' ? metric.value * 1000 : metric.value) / (metric.name === 'CLS' ? 1000 : 1),
+    rating: metric.rating || 'good',
+    delta: metric.delta ? Math.round(metric.delta * 100) / 100 : metric.value,
+    navigationType: metric.navigationType,
+  };
+
+  metricQueue.push(payload);
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(flushMetrics, 3000);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushMetrics);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushMetrics();
+    }
+  });
+}
+
 /**
- * 100% Native Zero-Dependency Core Web Vitals Monitor
- * Uses browser native PerformanceObserver to measure LCP, CLS, FCP, INP, and TTFB.
- * Eliminates Webpack module resolution issues and zero bundle weight.
+ * 100% Native Zero-Dependency Core Web Vitals Monitor with 3000ms batching debounce
+ * to prevent hitting server rate limits on page load.
  */
 export function WebVitalsMonitor() {
   useEffect(() => {
@@ -166,7 +189,7 @@ export function WebVitalsMonitor() {
       inputObserver.observe({ type: 'first-input', buffered: true });
     } catch {}
 
-    // 6. Global ChunkLoadError & SyntaxError Auto-Recovery (for Cloud Run deployments & chunk mismatches)
+    // 6. Global ChunkLoadError & SyntaxError Auto-Recovery
     const handleGlobalError = (event: ErrorEvent | PromiseRejectionEvent) => {
       const message = String((event instanceof ErrorEvent ? event.message : event.reason?.message) || event);
       if (
@@ -192,6 +215,7 @@ export function WebVitalsMonitor() {
     return () => {
       window.removeEventListener('error', handleGlobalError);
       window.removeEventListener('unhandledrejection', handleGlobalError);
+      flushMetrics();
     };
   }, []);
 

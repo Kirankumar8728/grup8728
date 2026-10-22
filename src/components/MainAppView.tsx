@@ -325,22 +325,18 @@ export function MainAppView({
 
       queryParams.set('page', pageNum.toString());
       queryParams.set('pageSize', '25');
-      queryParams.set('_t', Date.now().toString());
 
       const isAdultContext = filters.category === 'Adult / 18+' || Boolean(filters.showAdultOnly);
-      let res = await fetch(`/api/groups?${queryParams.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/groups?${queryParams.toString()}`, { cache: 'no-store' });
       
-      // Resilient LiteSpeed / CDN 429 handling: wait 1.5s and retry once before failing
       if (res.status === 429) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        res = await fetch(`/api/groups?${queryParams.toString()}`, { cache: 'no-store' });
+        rateLimitCooldownRef.current = Date.now() + 15000;
+        setLoading(false);
+        setIsLoadingMore(false);
+        return;
       }
 
       if (!res.ok) {
-        // If still 429, silently preserve existing groups without showing a jarring error banner
-        if (res.status === 429) {
-          return;
-        }
         throw new Error('Failed to load groups');
       }
 
@@ -408,9 +404,9 @@ export function MainAppView({
     fetchGroups(1, false);
   }, [fetchGroups, initialGroups]);
 
-  // Automatic infinite scroll when scrolling down near the bottom of group links or near the footer
   const infiniteScrollObserverRef = React.useRef<HTMLDivElement | null>(null);
-  const footerScrollSentinelRef = React.useRef<HTMLDivElement | null>(null);
+  const rateLimitCooldownRef = React.useRef<number>(0);
+  const lastLoadAttemptRef = React.useRef<number>(0);
 
   const pageRef = React.useRef(currentPage);
   pageRef.current = currentPage;
@@ -425,16 +421,18 @@ export function MainAppView({
   loadingRef.current = loading;
 
   const loadNextPage = React.useCallback(() => {
+    if (Date.now() < rateLimitCooldownRef.current) return;
+    if (Date.now() - lastLoadAttemptRef.current < 1200) return;
     if (isLoadingMoreRef.current || loadingRef.current || !hasMoreGroupsRef.current) return;
+    lastLoadAttemptRef.current = Date.now();
     const nextPage = pageRef.current + 1;
     fetchGroups(nextPage, true);
   }, [fetchGroups]);
 
-  // 1. IntersectionObserver on sentinels (grid bottom and footer)
+  // IntersectionObserver on single sentinel with rootMargin 200px 0px
   useEffect(() => {
-    const sentinel1 = infiniteScrollObserverRef.current;
-    const sentinel2 = footerScrollSentinelRef.current;
-    if (!sentinel1 && !sentinel2) return;
+    const sentinel = infiniteScrollObserverRef.current;
+    if (!sentinel) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -443,35 +441,12 @@ export function MainAppView({
           loadNextPage();
         }
       },
-      { rootMargin: '800px 0px' }
+      { rootMargin: '200px 0px' }
     );
 
-    if (sentinel1) observer.observe(sentinel1);
-    if (sentinel2) observer.observe(sentinel2);
-
+    observer.observe(sentinel);
     return () => observer.disconnect();
   }, [loadNextPage, groups.length]);
-
-  // 2. Active Window Scroll listener trigger when approaching footer
-  useEffect(() => {
-    let ticking = false;
-    const handleScroll = () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(() => {
-        ticking = false;
-        if (isLoadingMoreRef.current || loadingRef.current || !hasMoreGroupsRef.current) return;
-        const scrollPosition = window.innerHeight + window.scrollY;
-        const documentHeight = document.documentElement.scrollHeight;
-        if (scrollPosition >= documentHeight - 900) {
-          loadNextPage();
-        }
-      });
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [loadNextPage]);
 
   // Fetch stats once on mount if not provided by server
   useEffect(() => {
@@ -1224,8 +1199,6 @@ export function MainAppView({
         {!hideAds && <AdDisplay slot="footer_banner" />}
       </main>
 
-      {/* Footer Infinite Scroll Sentinel to load more groups when scrolling down */}
-      <div ref={footerScrollSentinelRef} className="h-2 w-full pointer-events-none opacity-0" aria-hidden="true" />
 
       {/* Global Semantic Footer */}
       <Footer />

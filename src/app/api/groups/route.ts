@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     // Rate limit: 5 submissions per 10 minutes per IP for non-admins
     if (!auth.isAdmin) {
-      const rateLimit = checkRateLimit(req, { limit: 5, windowMs: 10 * 60 * 1000, route: 'api_groups_post' });
+      const rateLimit = checkRateLimit(req, { limit: 15, windowMs: 10 * 60 * 1000, route: 'api_groups_post' });
       if (!rateLimit.allowed) {
         return rateLimitResponse(rateLimit.retryAfterSeconds, 'Submission rate limit reached. Please wait before submitting another community.');
       }

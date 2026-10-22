@@ -20,52 +20,89 @@ if (typeof setInterval !== 'undefined') {
   }, 5 * 60 * 1000);
 }
 
-function isPrivateIp(ip: string): boolean {
+/**
+ * Detects all loopback, local, and private IPv4/IPv6 addresses.
+ */
+export function isPrivateIp(ip: string): boolean {
   if (!ip) return true;
-  const clean = ip.trim();
-  if (clean === '127.0.0.1' || clean === '::1' || clean === 'localhost') return true;
-  if (clean.startsWith('10.') || clean.startsWith('192.168.')) return true;
+  const clean = ip.trim().toLowerCase();
+  
+  if (
+    clean === '127.0.0.1' ||
+    clean === '::1' ||
+    clean === 'localhost' ||
+    clean === '::ffff:127.0.0.1' ||
+    clean === '0.0.0.0' ||
+    clean.startsWith('10.') ||
+    clean.startsWith('192.168.') ||
+    clean.startsWith('fc') ||
+    clean.startsWith('fd') ||
+    clean.startsWith('fe80')
+  ) {
+    return true;
+  }
+
   if (clean.startsWith('172.')) {
     const parts = clean.split('.');
     const second = parseInt(parts[1], 10);
-    if (second >= 16 && second <= 31) return true;
+    if (second >= 16 && second <= 31) {
+      return true;
+    }
   }
+
   return false;
 }
 
 export function getClientIp(req: NextRequest): string {
-  // 1. Cloudflare True Client IP (highest priority on grouplinks.app)
-  const cfIp = req.headers.get('cf-connecting-ip');
-  if (cfIp && cfIp.trim()) {
-    return cfIp.trim();
-  }
+  // Check standard proxy headers in order of preference
+  const headerKeys = [
+    'cf-connecting-ip',
+    'true-client-ip',
+    'x-real-ip',
+    'x-client-ip',
+    'x-cluster-client-ip',
+  ];
 
-  // 2. Hostinger / Nginx Real IP
-  const realIp = req.headers.get('x-real-ip');
-  if (realIp && realIp.trim()) {
-    return realIp.trim();
-  }
-
-  // 3. X-Forwarded-For (extract first non-internal public client IP)
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    const ips = forwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
-    if (ips.length > 0) {
-      const publicIp = ips.find(ip => !isPrivateIp(ip));
-      if (publicIp) return publicIp;
-      return ips[0];
+  for (const key of headerKeys) {
+    const val = req.headers.get(key);
+    if (val && val.trim() && !isPrivateIp(val)) {
+      return val.trim();
     }
   }
 
-  // 4. Fallback to User-Agent + Accept-Language fingerprinting to avoid global 127.0.0.1 collision
+  // Check x-forwarded-for entries
+  const forwardedFor = req.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    const ips = forwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
+    for (const ip of ips) {
+      if (!isPrivateIp(ip)) {
+        return ip;
+      }
+    }
+  }
+
+  // Fallback: When running behind a local reverse proxy like Hostinger LiteSpeed
+  // where all forwarded IPs are loopback 127.0.0.1, build a compound browser fingerprint
+  // based on User-Agent, Accept-Language, Sec-CH-UA, and client cookie (gl_fp_id).
   const ua = req.headers.get('user-agent') || 'unknown';
   const acceptLang = req.headers.get('accept-language') || 'en';
+  const secChUa = req.headers.get('sec-ch-ua') || '';
+  
+  // Try extracting gl_fp_id cookie from request headers
+  const cookieHeader = req.headers.get('cookie') || '';
+  let cookieFp = '';
+  const match = cookieHeader.match(/gl_fp_id=([^;]+)/);
+  if (match && match[1]) {
+    cookieFp = match[1].trim();
+  }
+
+  const compoundString = `${cookieFp}|${ua}|${acceptLang}|${secChUa}`;
   let hash = 0;
-  const combined = `${ua}|${acceptLang}`;
-  for (let i = 0; i < combined.length; i++) {
-    hash = ((hash << 5) - hash) + combined.charCodeAt(i);
+  for (let i = 0; i < compoundString.length; i++) {
+    hash = ((hash << 5) - hash) + compoundString.charCodeAt(i);
     hash |= 0;
   }
+
   return `fp-${Math.abs(hash)}`;
 }
 

@@ -1,14 +1,32 @@
 # ----------------------------------------------------------------------
 # Hostinger LiteSpeed Web Server Configuration for grouplinks.app
-# Prevents LiteSpeed "HTTP ERROR 429" Per-Client Throttling on Next.js
+# Prevents LiteSpeed throttling and passes client IP correctly
 # ----------------------------------------------------------------------
 <IfModule Litespeed>
   RewriteEngine On
-  # Disable LiteSpeed Per-Client Connection & Request Throttling
-  RewriteRule .* - [E=nothrottle:1]
+  # LiteSpeed connection protection
+  RewriteRule .* - [E=noabort:1]
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:X-Forwarded-For} ^$
+  RewriteRule .* - [E=HTTP_X_REAL_IP:%{REMOTE_ADDR}]
 </IfModule>
 
 <IfModule mod_headers.c>
-  # Ensure LiteSpeed & Reverse Proxies pass real IP and do not buffer SSE/Streams
   Header set X-Accel-Buffering "no"
+</IfModule>
+
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresDefault "access plus 1 month"
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType image/gif "access plus 1 year"
+  ExpiresByType font/woff2 "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 month"
+  ExpiresByType text/css "access plus 1 month"
 </IfModule>

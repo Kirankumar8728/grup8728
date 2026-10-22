@@ -54,10 +54,6 @@ import {
   isGenericOrInvalidImage,
   sanitizeGroupUpdatesWithProtection
 } from './metadata-validator';
-import { startKeepAlive } from './keepalive';
-
-// Activate 4.50-minute Node.js anti-freeze keepalive heartbeat
-startKeepAlive();
 
 // Fast O(1) in-memory index for single group lookups by ID and Slug
 const groupsLookupIndex = new Map<string, Group>();
