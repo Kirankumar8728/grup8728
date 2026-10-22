@@ -232,9 +232,10 @@ export function isUnsplashUrl(url?: string): boolean {
 }
 
 /**
- * Returns a valid community image:
- * - If the group has a legitimate custom image URL (and NOT an Unsplash link), returns it.
- * - Otherwise, generates a category-related unique SVG image.
+ * Returns a valid community image following the strict 3-tier fallback hierarchy:
+ * 1. Prioritize cdn.grouplinks.app (or configured CDN domain in .env).
+ * 2. Fall back to direct images from the platforms if CDN is not configured or missing.
+ * 3. Fall back to category fallback image if platform image is blocked or missing.
  */
 export function resolveValidGroupImage(
   imageUrl?: string,
@@ -242,13 +243,23 @@ export function resolveValidGroupImage(
   title?: string,
   isBanner: boolean = false
 ): string {
+  const cdnDomain = process.env.NEXT_PUBLIC_CDN_DOMAIN || process.env.CDN_DOMAIN || process.env.R2_PUBLIC_DOMAIN || 'cdn.grouplinks.app';
+
   if (imageUrl && typeof imageUrl === 'string') {
     let trimmed = imageUrl.trim().replace(/&amp;/g, '&');
     if (trimmed.startsWith('//')) trimmed = `https:${trimmed}`;
-    if (trimmed && !trimmed.includes('unsplash.com')) {
+
+    if (trimmed && !trimmed.includes('unsplash.com') && !trimmed.startsWith('data:image/svg+xml')) {
+      // Tier 1: Check if it's on CDN domain
+      if (trimmed.includes(cdnDomain) || trimmed.includes('cdn.grouplinks.app')) {
+        return trimmed;
+      }
+      // Tier 2: Platform native image fallback if CDN not configured/used
       return trimmed;
     }
   }
+
+  // Tier 3: Category fallback image from website data
   return getCategoryFallbackImage(category, isBanner, title);
 }
 
