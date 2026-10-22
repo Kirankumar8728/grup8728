@@ -13,7 +13,7 @@ const DB_TIMEOUT_MS = 2500; // Strict 2.5s DB timeout to prevent 504 Gateway Tim
 
 /**
  * Handles backwards-compatible slug-based URLs like /join/tg-anilsiriti
- * and redirects immediately to the canonical /join?groupid={group.id}.
+ * and redirects immediately to the canonical /join?join-id={group.id}.
  * 
  * Safely guards against database stalls: if the lookup takes longer than 2.5s,
  * it immediately aborts and triggers notFound() rather than causing a 504.

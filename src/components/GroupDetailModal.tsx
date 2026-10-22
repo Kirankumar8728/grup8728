@@ -566,20 +566,20 @@ export const GroupDetailModal: React.FC<GroupDetailModalProps> = ({
             <Link
               href={getGroupRulesPath(group)}
               onClick={onClose}
-              title={`/rules?groupid=${getNumericGroupId(group)}`}
+              title={`/rules?join-id=${getNumericGroupId(group)}`}
               className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors flex items-center gap-1"
             >
               <span>Rules & Guidelines</span>
-              <span className="font-mono opacity-80">(/rules?groupid={getNumericGroupId(group)})</span>
+              <span className="font-mono opacity-80">(/rules?join-id={getNumericGroupId(group)})</span>
             </Link>
             <Link
               href={getGroupJoinPath(group)}
               onClick={onClose}
-              title={`/join?groupid=${getNumericGroupId(group)}`}
+              title={`/join?join-id=${getNumericGroupId(group)}`}
               className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline transition-colors font-semibold flex items-center gap-1"
             >
               <span>Direct Join Gateway</span>
-              <span className="font-mono opacity-80">(/join?groupid={getNumericGroupId(group)})</span>
+              <span className="font-mono opacity-80">(/join?join-id={getNumericGroupId(group)})</span>
               <span>→</span>
             </Link>
           </div>

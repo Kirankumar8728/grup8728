@@ -1590,8 +1590,8 @@ export function getNumericGroupId(
 
 /**
  * Generates the relative path for a group's rules page:
- * Canonical: /rules?groupid={NUMERIC_ID}
- * Always uses positive numeric ID (e.g. groupid=1234), never URLs or string identifiers.
+ * Canonical: /rules?join-id={NUMERIC_ID}
+ * Always uses positive numeric ID (e.g. join-id=1234), never URLs or string identifiers.
  */
 export function getGroupRulesPath(group: {
   id?: string | number;
@@ -1608,13 +1608,13 @@ export function getGroupRulesPath(group: {
   if (!numericId) {
     return '/rules';
   }
-  return `/rules?groupid=${numericId}`;
+  return `/rules?join-id=${numericId}`;
 }
 
 /**
  * Generates the relative path for a group's join gateway page:
- * Canonical: /join?groupid={NUMERIC_ID}
- * Always uses positive numeric ID (e.g. groupid=1234), never URLs or string identifiers.
+ * Canonical: /join?join-id={NUMERIC_ID}
+ * Always uses positive numeric ID (e.g. join-id=1234), never URLs or string identifiers.
  */
 export function getGroupJoinPath(group: {
   id?: string | number;
@@ -1631,7 +1631,7 @@ export function getGroupJoinPath(group: {
   if (!numericId) {
     return '/join';
   }
-  return `/join?groupid=${numericId}`;
+  return `/join?join-id=${numericId}`;
 }
 
 export const DEFAULT_AUTHOR_NAME = 'Anonymous Visitor';

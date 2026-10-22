@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 interface JoinPageProps {
-  searchParams: Promise<{ groupid?: string; group?: string; slug?: string; id?: string }>;
+  searchParams: Promise<{ 'join-id'?: string; groupid?: string; group?: string; slug?: string; id?: string }>;
 }
 
 async function fetchGroupSafe(identifier: string): Promise<any> {
@@ -26,7 +26,7 @@ async function fetchGroupSafe(identifier: string): Promise<any> {
 
 export async function generateMetadata({ searchParams }: JoinPageProps): Promise<Metadata> {
   const params = await searchParams;
-  const identifier = params.groupid || params.group || params.slug || params.id;
+  const identifier = params['join-id'] || params.groupid || params.group || params.slug || params.id;
   if (!identifier) {
     return buildPageMetadata({
       title: 'Join Community',
@@ -44,7 +44,7 @@ export async function generateMetadata({ searchParams }: JoinPageProps): Promise
   }
 
   const numericId = getNumericGroupId(group);
-  const canonicalPath = `/join?groupid=${numericId}`;
+  const canonicalPath = `/join?join-id=${numericId}`;
 
   return buildPageMetadata({
     title: `Join ${group.title} — Verified ${group.platform.toUpperCase()} Access`,
@@ -56,7 +56,7 @@ export async function generateMetadata({ searchParams }: JoinPageProps): Promise
 
 export default async function JoinPage({ searchParams }: JoinPageProps) {
   const params = await searchParams;
-  const identifier = params.groupid || params.group || params.slug || params.id;
+  const identifier = params['join-id'] || params.groupid || params.group || params.slug || params.id;
   if (!identifier) {
     redirect('/');
   }
@@ -69,8 +69,8 @@ export default async function JoinPage({ searchParams }: JoinPageProps) {
   const numericId = getNumericGroupId(group);
 
   // Guarantee canonical numeric ID routing: strictly redirect away from string identifiers like grp-lang-assamese-2
-  if (params.groupid !== String(numericId)) {
-    redirect(`/join?groupid=${numericId}`);
+  if (params['join-id'] !== String(numericId)) {
+    redirect(`/join?join-id=${numericId}`);
   }
 
   if (group.isExpired || group.isActive === false) {
@@ -97,7 +97,7 @@ export default async function JoinPage({ searchParams }: JoinPageProps) {
   const breadcrumbJsonLd = generateBreadcrumbsJsonLd([
     { name: 'Home', url: '/' },
     { name: group.title, url: groupCanonical },
-    { name: 'Join Community', url: `/join?groupid=${numericId}` },
+    { name: 'Join Community', url: `/join?join-id=${numericId}` },
   ]);
 
   return (

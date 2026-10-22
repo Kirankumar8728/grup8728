@@ -69,9 +69,9 @@ export function StandaloneJoinFlow({ group, initialStep }: StandaloneJoinFlowPro
     setCurrentStep(step);
     const numericId = getNumericGroupId(group);
     if (step === 1) {
-      window.history.pushState({}, '', `/rules?groupid=${numericId}`);
+      window.history.pushState({}, '', `/rules?join-id=${numericId}`);
     } else {
-      window.history.pushState({}, '', `/join?groupid=${numericId}`);
+      window.history.pushState({}, '', `/join?join-id=${numericId}`);
     }
   };
 

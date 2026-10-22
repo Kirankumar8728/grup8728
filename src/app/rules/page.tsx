@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 interface RulesPageProps {
-  searchParams: Promise<{ groupid?: string; group?: string; slug?: string; id?: string }>;
+  searchParams: Promise<{ 'join-id'?: string; groupid?: string; group?: string; slug?: string; id?: string }>;
 }
 
 async function fetchGroupSafe(identifier: string): Promise<any> {
@@ -25,7 +25,7 @@ async function fetchGroupSafe(identifier: string): Promise<any> {
 
 export async function generateMetadata({ searchParams }: RulesPageProps): Promise<Metadata> {
   const params = await searchParams;
-  const identifier = params.groupid || params.group || params.slug || params.id;
+  const identifier = params['join-id'] || params.groupid || params.group || params.slug || params.id;
   if (!identifier) {
     return buildPageMetadata({
       title: 'Rules & Guidelines',
@@ -43,7 +43,7 @@ export async function generateMetadata({ searchParams }: RulesPageProps): Promis
   }
 
   const numericId = getNumericGroupId(group);
-  const canonicalPath = `/rules?groupid=${numericId}`;
+  const canonicalPath = `/rules?join-id=${numericId}`;
 
   return buildPageMetadata({
     title: `${group.title} Rules & Guidelines — Step 1`,
@@ -55,7 +55,7 @@ export async function generateMetadata({ searchParams }: RulesPageProps): Promis
 
 export default async function RulesPage({ searchParams }: RulesPageProps) {
   const params = await searchParams;
-  const identifier = params.groupid || params.group || params.slug || params.id;
+  const identifier = params['join-id'] || params.groupid || params.group || params.slug || params.id;
   if (!identifier) {
     redirect('/guidelines');
   }
@@ -68,8 +68,8 @@ export default async function RulesPage({ searchParams }: RulesPageProps) {
   const numericId = getNumericGroupId(group);
 
   // Guarantee canonical numeric ID routing: strictly redirect away from string identifiers like grp-lang-assamese-2
-  if (params.groupid !== String(numericId)) {
-    redirect(`/rules?groupid=${numericId}`);
+  if (params['join-id'] !== String(numericId)) {
+    redirect(`/rules?join-id=${numericId}`);
   }
 
   const jsonLd = generateGroupJsonLd(group);
@@ -77,7 +77,7 @@ export default async function RulesPage({ searchParams }: RulesPageProps) {
   const breadcrumbJsonLd = generateBreadcrumbsJsonLd([
     { name: 'Home', url: '/' },
     { name: group.title, url: groupCanonical },
-    { name: 'Rules & Guidelines', url: `/rules?groupid=${numericId}` },
+    { name: 'Rules & Guidelines', url: `/rules?join-id=${numericId}` },
   ]);
 
   return (
