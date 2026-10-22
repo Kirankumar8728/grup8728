@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, cache } from 'react';
 import { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { getGroupBySlug, getRelatedGroups } from '@/src/lib/groups-dal';
@@ -6,17 +6,22 @@ import { buildPageMetadata, generateGroupJsonLd, generateBreadcrumbsJsonLd } fro
 import { GroupDetailPage } from '@/src/components/GroupDetailPage';
 import { getGroupUrlPath, categoryToSlug } from '@/src/utils/helpers';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+// Enable Incremental Static Regeneration (ISR) so Hostinger / LiteSpeed serve pages in <30ms from cache
+export const revalidate = 60;
 
 interface PageProps {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }
 
+// Request-scoped memoization: Prevents generateMetadata and GroupPage from executing redundant DB queries
+const getCachedGroup = cache(async (slug: string) => {
+  return await getGroupBySlug(slug);
+});
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
-  const group = await getGroupBySlug(slug);
+  const group = await getCachedGroup(slug);
 
   if (!group) {
     return buildPageMetadata({
@@ -43,9 +48,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function GroupPage({ params }: PageProps) {
   const { slug } = await params;
-  const group = await getGroupBySlug(slug);
-
-  console.log('Loaded group for page', group);
+  const group = await getCachedGroup(slug);
 
   if (!group || group.isExpired || group.isActive === false) {
     const categorySlug = group ? categoryToSlug(group.category || 'Tech & Programming') : 'all';

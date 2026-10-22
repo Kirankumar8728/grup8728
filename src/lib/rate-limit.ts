@@ -21,19 +21,35 @@ if (typeof setInterval !== 'undefined') {
 }
 
 export function getClientIp(req: NextRequest): string {
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    return forwardedFor.split(',')[0].trim();
-  }
-  const realIp = req.headers.get('x-real-ip');
-  if (realIp) {
-    return realIp.trim();
-  }
+  // 1. Cloudflare True Client IP (highest priority on grouplinks.app)
   const cfIp = req.headers.get('cf-connecting-ip');
-  if (cfIp) {
+  if (cfIp && cfIp.trim()) {
     return cfIp.trim();
   }
-  return '127.0.0.1';
+
+  // 2. Hostinger / Nginx Real IP
+  const realIp = req.headers.get('x-real-ip');
+  if (realIp && realIp.trim()) {
+    return realIp.trim();
+  }
+
+  // 3. X-Forwarded-For (extract first non-internal client IP)
+  const forwardedFor = req.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    const ips = forwardedFor.split(',').map(ip => ip.trim()).filter(Boolean);
+    if (ips.length > 0) {
+      return ips[0];
+    }
+  }
+
+  // 4. Fallback to User-Agent differentiation to avoid global 127.0.0.1 collision
+  const ua = req.headers.get('user-agent') || 'unknown';
+  let uaHash = 0;
+  for (let i = 0; i < ua.length; i++) {
+    uaHash = ((uaHash << 5) - uaHash) + ua.charCodeAt(i);
+    uaHash |= 0;
+  }
+  return `local-${Math.abs(uaHash)}`;
 }
 
 export interface RateLimitOptions {

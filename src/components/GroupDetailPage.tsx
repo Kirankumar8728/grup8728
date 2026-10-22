@@ -123,11 +123,16 @@ export const GroupDetailPage: React.FC<GroupDetailPageProps> = ({
     setGroup(initialGroup);
   }, [initialGroup]);
 
-  // Client-side self-healing: If group title is a raw invite hash or image is missing/fallback, fetch live metadata immediately
+  // Client-side self-healing: Only if group title is strictly a raw invite hash or completely missing
+  const hasAttemptedScrapeRef = React.useRef(false);
   React.useEffect(() => {
-    const isRawHashTitle = !group.title || isGenericGroupTitle(group.title) || (/^[+]?[a-zA-Z0-9_-]{10,}$/.test(group.title.trim()) && !group.title.includes(' '));
-    const isFallbackImg = !group.imageUrl || group.imageUrl.startsWith('data:image/') || group.imageUrl.includes('fallback');
-    if ((isRawHashTitle || isFallbackImg) && group.url) {
+    if (hasAttemptedScrapeRef.current) return;
+    const isRawHashTitle = !group.title || isGenericGroupTitle(group.title) || (/^[+]?[a-zA-Z0-9_-]{12,}$/.test(group.title.trim()) && !group.title.includes(' '));
+    const isCompletelyMissingImg = !group.imageUrl || group.imageUrl.trim() === '';
+    
+    // Never trigger scrape on valid SVG data images or groups that already have real titles
+    if (isRawHashTitle && isCompletelyMissingImg && group.url) {
+      hasAttemptedScrapeRef.current = true;
       fetch('/api/scrape-metadata', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -148,7 +153,7 @@ export const GroupDetailPage: React.FC<GroupDetailPageProps> = ({
         })
         .catch(() => {});
     }
-  }, [group.id, group.url]);
+  }, [group.id, group.url, group.title, group.imageUrl]);
   const { user: currentUser, setUser } = useAuth();
   const [isBookmarked, setIsBookmarked] = useState<boolean>(initialIsBookmarked || false);
   const [copiedLink, setCopiedLink] = useState(false);

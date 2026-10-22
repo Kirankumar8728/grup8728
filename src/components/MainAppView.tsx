@@ -328,8 +328,22 @@ export function MainAppView({
       queryParams.set('_t', Date.now().toString());
 
       const isAdultContext = filters.category === 'Adult / 18+' || Boolean(filters.showAdultOnly);
-      const res = await fetch(`/api/groups?${queryParams.toString()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('Failed to load groups');
+      let res = await fetch(`/api/groups?${queryParams.toString()}`, { cache: 'no-store' });
+      
+      // Resilient LiteSpeed / CDN 429 handling: wait 1.5s and retry once before failing
+      if (res.status === 429) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        res = await fetch(`/api/groups?${queryParams.toString()}`, { cache: 'no-store' });
+      }
+
+      if (!res.ok) {
+        // If still 429, silently preserve existing groups without showing a jarring error banner
+        if (res.status === 429) {
+          return;
+        }
+        throw new Error('Failed to load groups');
+      }
+
       const data = await res.json();
 
       const newItems: Group[] = data.groups || [];
@@ -353,7 +367,13 @@ export function MainAppView({
         setHasMoreGroups(sorted.length < totalCount);
       }
     } catch (err: any) {
-      setError(err.message || 'Error fetching communities');
+      // Only display the error banner if no groups are currently visible to the visitor
+      setGroups(prev => {
+        if (prev.length === 0) {
+          setError(err.message || 'Error fetching communities');
+        }
+        return prev;
+      });
     } finally {
       setLoading(false);
       setIsLoadingMore(false);

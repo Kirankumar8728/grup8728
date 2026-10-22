@@ -165,6 +165,34 @@ export function WebVitalsMonitor() {
       });
       inputObserver.observe({ type: 'first-input', buffered: true });
     } catch {}
+
+    // 6. Global ChunkLoadError & SyntaxError Auto-Recovery (for Cloud Run deployments & chunk mismatches)
+    const handleGlobalError = (event: ErrorEvent | PromiseRejectionEvent) => {
+      const message = String((event instanceof ErrorEvent ? event.message : event.reason?.message) || event);
+      if (
+        message.includes('Loading chunk') ||
+        message.includes('ChunkLoadError') ||
+        message.includes('Unexpected token') ||
+        message.includes('SyntaxError') ||
+        message.includes('app/layout') ||
+        message.includes('Loading CSS chunk')
+      ) {
+        const reloadKey = 'app_chunk_auto_reload';
+        const lastReload = sessionStorage.getItem(reloadKey);
+        if (!lastReload || Date.now() - Number(lastReload) > 15000) {
+          sessionStorage.setItem(reloadKey, String(Date.now()));
+          window.location.reload();
+        }
+      }
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleGlobalError);
+
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleGlobalError);
+    };
   }, []);
 
   return null;

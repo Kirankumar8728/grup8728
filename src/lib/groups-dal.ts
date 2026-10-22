@@ -507,36 +507,24 @@ export async function getGroupBySlug(idOrSlug: string): Promise<Group | null> {
     }
   }
 
-  // 3. Self-Heal: If group was found but has a raw invite code as title, or missing/fallback image, enrich it live!
+  // 3. Fast Store Hit: Return stored group immediately without blocking SSR on external HTTP network calls
   if (storeHit) {
-    const isRawCodeTitle = !storeHit.title || isGenericGroupTitle(storeHit.title) || /^[+]?[a-zA-Z0-9_-]{10,}$/.test(storeHit.title.trim());
-    const hasFallbackImg = !storeHit.imageUrl || storeHit.imageUrl.includes('fallback') || storeHit.imageUrl.startsWith('data:image/');
-    if ((isRawCodeTitle || hasFallbackImg) && storeHit.url) {
-      try {
-        const liveMeta = await scrapeGroupMetadataDirect(storeHit.url, storeHit.platform);
-        if (liveMeta && liveMeta.success && liveMeta.title && !isGenericGroupTitle(liveMeta.title)) {
-          storeHit.title = liveMeta.title;
-          if (liveMeta.imageUrl && (liveMeta.imageUrl.startsWith('http://') || liveMeta.imageUrl.startsWith('https://'))) {
-            storeHit.imageUrl = liveMeta.imageUrl;
-            storeHit.bannerUrl = liveMeta.bannerUrl || liveMeta.imageUrl;
+    // If the group exists, return it immediately (< 5ms response time)
+    // Only perform background non-blocking enrichment if the title is strictly a raw invite code hash
+    const isRawCodeTitle = !storeHit.title || isGenericGroupTitle(storeHit.title) || /^[+]?[a-zA-Z0-9_-]{12,}$/.test(storeHit.title.trim());
+    if (isRawCodeTitle && storeHit.url && typeof window === 'undefined') {
+      // Fire-and-forget in background without awaiting or blocking the SSR response
+      scrapeGroupMetadataDirect(storeHit.url, storeHit.platform)
+        .then((liveMeta) => {
+          if (liveMeta && liveMeta.success && liveMeta.title && !isGenericGroupTitle(liveMeta.title)) {
+            updateGroupInStore(storeHit.id, {
+              title: liveMeta.title,
+              category: (liveMeta.suggestedCategory && liveMeta.suggestedCategory !== 'General') ? liveMeta.suggestedCategory : undefined,
+              description: liveMeta.description || undefined,
+            }).catch(() => {});
           }
-          if (liveMeta.suggestedCategory && liveMeta.suggestedCategory !== 'General') {
-            storeHit.category = liveMeta.suggestedCategory;
-          }
-          if (liveMeta.description && !isGenericGroupTitle(liveMeta.description)) {
-            storeHit.description = liveMeta.description;
-          }
-          updateGroupInStore(storeHit.id, {
-            title: storeHit.title,
-            imageUrl: storeHit.imageUrl,
-            bannerUrl: storeHit.bannerUrl,
-            category: storeHit.category,
-            description: storeHit.description,
-          }).catch(() => {});
-        }
-      } catch (enrichErr) {
-        console.warn('[getGroupBySlug] Self-heal live metadata notice:', enrichErr);
-      }
+        })
+        .catch(() => {});
     }
     return storeHit;
   }
@@ -565,7 +553,9 @@ export async function getGroupBySlug(idOrSlug: string): Promise<Group | null> {
 
   let liveMeta: any = null;
   try {
-    liveMeta = await scrapeGroupMetadataDirect(targetUrl, inferredPlatform);
+    const scrapePromise = scrapeGroupMetadataDirect(targetUrl, inferredPlatform);
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
+    liveMeta = await Promise.race([scrapePromise, timeoutPromise]);
   } catch (scrapeErr) {
     console.warn('[getGroupBySlug] Live scrape notice:', scrapeErr);
   }
