@@ -1862,5 +1862,40 @@ export function extractUrlsFromText(text: string): string[] {
   return uniqueUrls;
 }
 
-
-
+/**
+ * Safely fetches a URL and parses JSON response, preventing "Unexpected token '<'" SyntaxError
+ * when the server returns an HTML error page (e.g. 504 Gateway Timeout or 404).
+ */
+export async function safeFetchJson(url: string, options?: RequestInit): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      if (text.trim().startsWith('<')) {
+        return {
+          ok: false,
+          status: res.status || 500,
+          data: null,
+          error: `Server error (${res.status || 500}): HTML response received instead of JSON`,
+        };
+      }
+      data = { rawText: text };
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      data,
+      error: res.ok ? undefined : (data?.error || data?.message || `Request failed with status ${res.status}`),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: 500,
+      data: null,
+      error: err?.message || 'Network request failed',
+    };
+  }
+}
