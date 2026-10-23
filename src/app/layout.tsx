@@ -4,6 +4,7 @@ import './globals.css';
 import { getSiteUrl, generateWebSiteJsonLd, generateOrganizationJsonLd } from '@/src/lib/rank';
 import { getCustomScriptsServer } from '@/src/lib/server-scripts-persistence';
 import AppProviders from '@/src/components/AppProviders';
+import { CookieConsentBanner } from '@/src/components/CookieConsentBanner';
 
 function getSanitizedGaId(customId?: string): string | null {
   const candidate = (
@@ -140,6 +141,7 @@ export default function RootLayout({
         />
         <AppProviders>
           {children}
+          <CookieConsentBanner />
         </AppProviders>
       </body>
     </html>

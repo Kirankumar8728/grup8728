@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { globalRequestThrottler } from './requestThrottle';
 
 export interface GroupStatItem {
   upvotes: number;
@@ -22,21 +23,22 @@ export function useLiveStats(groupIds: string[]) {
     const ids = key.split(',').filter(Boolean);
     if (ids.length === 0) return;
 
-    // Update lastFetchedKeyRef immediately when invoked to prevent repeat re-fetches
     lastFetchedKeyRef.current = key;
 
     try {
-      const res = await fetch(`/api/stats/batch?ids=${encodeURIComponent(ids.join(','))}`);
-      if (res.status === 429) {
-        rateLimitCooldownRef.current = Date.now() + 30000;
-        return;
-      }
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.stats) {
-          setStatsMap(prev => ({ ...prev, ...data.stats }));
+      await globalRequestThrottler.enqueue(async () => {
+        const res = await fetch(`/api/stats/batch?ids=${encodeURIComponent(ids.join(','))}`);
+        if (res.status === 429) {
+          rateLimitCooldownRef.current = Date.now() + 30000;
+          return;
         }
-      }
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.stats) {
+            setStatsMap(prev => ({ ...prev, ...data.stats }));
+          }
+        }
+      });
     } catch {}
   }, []);
 
@@ -68,11 +70,13 @@ export function useLiveStats(groupIds: string[]) {
       return { ...prev, [groupId]: updated };
     });
 
-    // Non-blocking background sync
-    fetch('/api/stats/increment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groupId, action }),
+    // Non-blocking background sync via throttler
+    globalRequestThrottler.enqueue(async () => {
+      await fetch('/api/stats/increment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, action }),
+      });
     }).catch(() => {});
   }, []);
 
