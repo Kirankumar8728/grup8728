@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
 
     if (detectedPlatform === 'whatsapp' && fetchedMetadata?.isExpired) {
       return NextResponse.json(
-        { success: false, error: '❌ This WhatsApp group invite link is expired or inactive. Expired group links cannot be published.' },
+        { success: false, error: 'This invite link got expired add other active link' },
         { status: 400, headers: REALTIME_NO_CACHE_HEADERS }
       );
     }
