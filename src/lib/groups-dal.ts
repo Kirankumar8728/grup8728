@@ -256,11 +256,12 @@ async function fetchGroupsFromMySQL(options: GetGroupsOptions): Promise<Paginate
     const conditions: string[] = [];
     const params: any[] = [];
 
-    // Active status filter (default: isActive = 1)
+    // Active status & expiration filter (default: isActive = 1 and not expired)
     if (options.status && options.status !== 'all') {
       conditions.push(options.status === 'approved' ? 'isActive = 1' : 'isActive = 0');
     } else if (!options.status) {
       conditions.push('isActive = 1');
+      conditions.push('(isExpired = 0 OR isExpired IS NULL)');
     }
 
     // Adult filter
@@ -1225,10 +1226,10 @@ export async function getLeaderboardData(category?: string): Promise<{ topUpvote
   const pool = getPool();
   if (pool) {
     try {
-      let where = 'WHERE isActive = 1 AND isNsfw = 0';
+      let where = 'WHERE isActive = 1 AND (isExpired = 0 OR isExpired IS NULL) AND isNsfw = 0';
       const params: any[] = [];
       if (category && category !== 'all' && category !== 'All Categories') {
-        where = 'WHERE isActive = 1 AND category = ?';
+        where = 'WHERE isActive = 1 AND (isExpired = 0 OR isExpired IS NULL) AND category = ?';
         params.push(category);
       }
 
@@ -1428,7 +1429,7 @@ export async function get24HourTrending(
 
         const [backfillRows]: any = await executeWithTimeout(
           pool.query(
-            `SELECT ${GROUP_CARD_COLUMNS} FROM groups_dir WHERE isActive = 1 ${platformCondition} ${excludeClause} ORDER BY clicks DESC, upvotes DESC LIMIT ?`,
+            `SELECT ${GROUP_CARD_COLUMNS} FROM groups_dir WHERE isActive = 1 AND (isExpired = 0 OR isExpired IS NULL) ${platformCondition} ${excludeClause} ORDER BY clicks DESC, upvotes DESC LIMIT ?`,
             backfillParams
           ),
           3000
@@ -1580,7 +1581,7 @@ export async function get7DayTrending(
 
         const [backfillRows]: any = await executeWithTimeout(
           pool.query(
-            `SELECT ${GROUP_CARD_COLUMNS} FROM groups_dir WHERE isActive = 1 ${platformCondition} ${excludeClause} ORDER BY clicks DESC, upvotes DESC LIMIT ?`,
+            `SELECT ${GROUP_CARD_COLUMNS} FROM groups_dir WHERE isActive = 1 AND (isExpired = 0 OR isExpired IS NULL) ${platformCondition} ${excludeClause} ORDER BY clicks DESC, upvotes DESC LIMIT ?`,
             backfillParams
           ),
           3000
@@ -1623,7 +1624,7 @@ export async function getRelatedGroups(group: Group, limit = 6): Promise<Group[]
     try {
       const [rows]: any = await executeWithTimeout(
         pool.query(
-          'SELECT * FROM groups_dir WHERE category = ? AND id != ? AND isActive = 1 ORDER BY upvotes DESC, memberCount DESC LIMIT ?',
+          'SELECT * FROM groups_dir WHERE category = ? AND id != ? AND isActive = 1 AND (isExpired = 0 OR isExpired IS NULL) ORDER BY upvotes DESC, memberCount DESC LIMIT ?',
           [group.category, group.id, limit]
         ),
         3000

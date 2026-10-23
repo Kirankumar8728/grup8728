@@ -118,6 +118,16 @@ export async function uploadImageToR2(
       inputBuffer = Buffer.from(arrayBuffer);
     }
 
+    // Server-side image integrity & validity check
+    if (!inputBuffer || inputBuffer.length < 500) {
+      return { success: false, error: 'Image file is too small or empty (< 500 bytes)' };
+    }
+
+    const metadata = await sharp(inputBuffer).metadata().catch(() => null);
+    if (!metadata || !metadata.format || !metadata.width || !metadata.height || metadata.width < 10 || metadata.height < 10) {
+      return { success: false, error: 'Invalid, corrupted, or broken image file detected during server-side verification' };
+    }
+
     // 150x150 Heavy WebP Compression (Fair Use Thumbnail Specs)
     const compressedWebpBuffer = await sharp(inputBuffer)
       .resize(150, 150, {

@@ -806,7 +806,7 @@ export async function queryGroups(options: GetGroupsOptions = {}) {
 
   // Exclude inactive / expired / revoked links by default
   if (!options.includeInactive) {
-    filtered = filtered.filter(g => g.isActive !== false && g.is_active !== false);
+    filtered = filtered.filter(g => g.isActive !== false && g.is_active !== false && !g.isExpired);
   }
 
   const {
@@ -1545,7 +1545,7 @@ export async function get24HourTrendingGroups(platform?: string, limit: number =
   const db = getGroupsDatabase();
   const cycle = get24HourCycleExpiration();
 
-  let filtered = db.filter(g => !isAdultGroup(g) && g.isActive !== false && (g as any).is_active !== false);
+  let filtered = db.filter(g => !isAdultGroup(g) && g.isActive !== false && (g as any).is_active !== false && !g.isExpired);
   if (platform && platform !== 'all') {
     filtered = filtered.filter(g => g.platform.toLowerCase() === platform.toLowerCase());
   }

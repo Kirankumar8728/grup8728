@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/src/lib/rate-limit';
 import { requireAdmin } from '@/src/lib/admin-auth';
 import { scrapeGroupMetadataDirect, normalizePlatformUrl, isSafePublicUrl } from '@/src/lib/metadata-scraper';
+import { uploadImageToR2, isR2Configured } from '@/src/lib/r2-storage';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -66,6 +67,19 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await scrapeGroupMetadataDirect(url.trim(), detectedPlatform);
+
+    // If image was scraped and R2 is configured, immediately upload to Cloudflare R2 (cdn.grouplinks.app)
+    if (result && result.imageUrl && !result.imageUrl.includes('cdn.grouplinks.app') && !result.imageUrl.startsWith('data:image/') && isR2Configured()) {
+      try {
+        const r2Res = await uploadImageToR2(result.imageUrl, result.title || 'group-icon');
+        if (r2Res.success && r2Res.r2Url) {
+          result.imageUrl = r2Res.r2Url;
+        }
+      } catch (r2Err) {
+        console.warn('[ScrapeMetadata API] R2 upload notice:', r2Err);
+      }
+    }
+
     return NextResponse.json(result, { headers: NO_CACHE_HEADERS });
   } catch (error: any) {
     return NextResponse.json(

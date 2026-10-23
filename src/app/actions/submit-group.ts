@@ -430,8 +430,32 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
   // Step 7: Construct Schema-compliant Group Record
   const newId = `grp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
   const slug = generateSlug(cleanTitle) || newId;
-  const validImageUrl = resolveValidGroupImage(finalImageUrl, cleanCategory, cleanTitle, false);
-  const validBannerUrl = resolveValidGroupImage(finalBannerUrl || finalImageUrl, cleanCategory, cleanTitle, true);
+
+  // Upload image to Cloudflare R2 (cdn.grouplinks.app)
+  let r2NewImageUrl = finalImageUrl;
+  if (r2NewImageUrl && !r2NewImageUrl.includes('cdn.grouplinks.app') && !r2NewImageUrl.startsWith('data:image/')) {
+    try {
+      const r2Res = await uploadImageToR2(r2NewImageUrl, cleanTitle || 'group-icon');
+      if (r2Res.success && r2Res.r2Url) {
+        r2NewImageUrl = r2Res.r2Url;
+      }
+    } catch (r2Err) {
+      console.warn('[SubmitGroupAction] R2 upload notice for new group:', r2Err);
+    }
+  }
+
+  let r2NewBannerUrl = finalBannerUrl || r2NewImageUrl;
+  if (r2NewBannerUrl && !r2NewBannerUrl.includes('cdn.grouplinks.app') && !r2NewBannerUrl.startsWith('data:image/')) {
+    try {
+      const r2BannerRes = await uploadImageToR2(r2NewBannerUrl, `${cleanTitle || 'group'}-banner`);
+      if (r2BannerRes.success && r2BannerRes.r2Url) {
+        r2NewBannerUrl = r2BannerRes.r2Url;
+      }
+    } catch {}
+  }
+
+  const validImageUrl = resolveValidGroupImage(r2NewImageUrl, cleanCategory, cleanTitle, false);
+  const validBannerUrl = resolveValidGroupImage(r2NewBannerUrl, cleanCategory, cleanTitle, true);
 
   const groupRecord: Partial<Group> = {
     id: newId,
@@ -456,7 +480,7 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
     metadataSource: fetchedMetadata?.metadataSource || 'fallback',
     fallbackMetadata: Boolean(fetchedMetadata?.fallbackMetadata),
     lastMetadataFetchAt: fetchedMetadata?.lastMetadataFetchAt || new Date().toISOString(),
-    metadataFetchError: fetchedMetadata?.metadataFetchError || null,
+    ...(fetchedMetadata?.metadataFetchError ? { metadataFetchError: fetchedMetadata.metadataFetchError } : {}),
     growthRate: 0,
     clicks: 0,
     upvotes: 0,
