@@ -1,24 +1,21 @@
-# Implementation Plan - HTTP 429 (Too Many Requests) Error Mitigation & Rate Limiting Audit
+# Implementation Plan - Block Expired WhatsApp Groups & Display Red Inline Error Banner
 
-## Problem Statement
-The user is experiencing HTTP 429 Too Many Requests errors across the application. This typically occurs due to:
-1. Strict server-side rate limits in `src/lib/rate-limit.ts` triggering on normal rapid interactions (upvotes, shares, search filtering).
-2. Client-side rapid-fire network requests without throttling or debouncing.
-3. Background polling intervals requesting data too frequently.
+## Goal
+Ensure that when a user attempts to submit or scrape an expired WhatsApp group link (such as `https://chat.whatsapp.com/invite/GlKFjqZ0Fm8FgdrgGhpWAU`), the system:
+1. Instantly detects the expired status (title containing "Expired WhatsApp Group" or `isExpired === true`).
+2. **Never publishes** the expired group to the database or public listings.
+3. Displays a **prominent red inline error banner** directly on the submit form stating: `"This invite link got expired add other active link"`.
 
 ## Proposed Changes
 
-### 1. Review & Adjust Rate Limit Thresholds (`src/lib/rate-limit.ts`)
-- Audit rate limit windows and request quotas for public and mutation endpoints.
-- Ensure relaxed thresholds for upvotes and shares to prevent false-positive 429 errors for active users.
+### 1. Backend Validation & Scraping (`src/lib/metadata-scraper.ts` & `src/app/actions/submit-group.ts` & `src/app/api/groups/route.ts`)
+- Verify `scrapeWhatsAppDirect` explicitly flags `isExpired: true` and sets title to `"Expired WhatsApp Group"` when WhatsApp link is dead or lacks an active `h3` title/avatar.
+- Ensure `submit-group` action and `/api/groups/route.ts` check for `fetchedMetadata?.isExpired` or `cleanTitle.includes('Expired WhatsApp Group')` and return `{ success: false, error: 'This invite link got expired add other active link' }`.
 
-### 2. Client-Side Debounce & Throttle Protection
-- Add client-side request deduplication and cooldowns on upvote/share buttons.
-- Implement debounced input handlers for search and filtering.
-
-### 3. Review Polling Intervals
-- Inspect hooks and components performing periodic fetch calls to ensure appropriate intervals (e.g., >= 10 seconds).
+### 2. Frontend Submit Form UI (`src/components/SubmitGroupView.tsx`)
+- Capture the error response when submission or live preview scraping returns an expired link notice.
+- Render a prominent **red inline error alert banner** directly on the submit form with the message: `"This invite link got expired add other active link"`.
 
 ## Verification Plan
-- Verify type checking with `npm run lint` (`tsc --noEmit`).
-- Test interactive actions to ensure smooth response without 429 errors.
+- Run `npm run lint` (`npx tsc --noEmit`) to verify type safety.
+- Test submitting an expired WhatsApp link to confirm publication is blocked and the red inline error banner appears.

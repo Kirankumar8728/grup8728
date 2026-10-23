@@ -1077,6 +1077,25 @@ async function scrapeWhatsAppDirect(targetUrl: string): Promise<{
   let rawMeta: Record<string, string> = {};
   let directHtml = fetchRes.ok ? fetchRes.html : '';
 
+  const htmlLower = directHtml.toLowerCase();
+  if (
+    htmlLower.includes('invite link is invalid') ||
+    htmlLower.includes('link is invalid') ||
+    htmlLower.includes('no longer available') ||
+    htmlLower.includes('group was reset') ||
+    htmlLower.includes('expired') ||
+    (directHtml.length > 0 && !htmlLower.includes('pps.whatsapp.net') && !htmlLower.includes('h3'))
+  ) {
+    return {
+      title: 'Expired WhatsApp Group',
+      description: 'This invite link got expired add other active link',
+      imageUrl: '',
+      memberCount: 0,
+      isVerified: false,
+      isExpired: true,
+    };
+  }
+
   if (!directHtml || directHtml.length < 200 || directHtml.includes('429 Too Many Requests')) {
     try {
       const ml = await fetchMicrolinkFallback(targetUrl);

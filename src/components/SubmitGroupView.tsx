@@ -310,9 +310,13 @@ export const SubmitGroupView = () => {
         return;
       }
 
-      if (!res.ok || !data.success) {
-        setScrapeError(data.error || 'Unable to scrape metadata. You can enter details manually below.');
-        setManualModeActive(true);
+      if (!res.ok || !data.success || data.isExpired || (data.title && data.title.toLowerCase().includes('expired'))) {
+        const errMsg = (data.title && data.title.toLowerCase().includes('expired')) || data.isExpired
+          ? 'This invite link got expired add other active link'
+          : (data.error || 'Unable to scrape metadata. You can enter details manually below.');
+        setScrapeError(errMsg);
+        setSubmitError(errMsg);
+        setIsScraping(false);
         return;
       }
 
@@ -640,6 +644,11 @@ export const SubmitGroupView = () => {
       console.log('[SubmitGroupUI] Server response received:', data);
 
       if (!data || !data.success) {
+        if (data?.isExpired || (data?.error && data.error.toLowerCase().includes('expired'))) {
+          setSubmitError('This invite link got expired add other active link');
+          setIsSubmitting(false);
+          return;
+        }
         if (data?.isDuplicate && data.matchedGroup) {
           console.warn('[SubmitGroupUI] Duplicate detected:', data.matchedGroup);
           setDuplicateCheckResult({
@@ -648,10 +657,12 @@ export const SubmitGroupView = () => {
             reason: data.error
           });
           setSubmitError(`This community is already listed as "${data.matchedGroup.title}". Click "Update Existing Group" to update its details.`);
+          setIsSubmitting(false);
           return;
         }
         if (data?.diagnosticStep === 'SUBMISSION_THROTTLED' || data?.error?.toLowerCase().includes('rate limit') || data?.error?.toLowerCase().includes('rapidly')) {
           setSubmitError(`⏳ Rate Limit: ${data.error || 'Submissions sent too rapidly. Please wait a moment and try again.'}`);
+          setIsSubmitting(false);
           return;
         }
         console.error('[SubmitGroupUI] Submission rejected by server:', data?.error || 'Unknown server rejection');
