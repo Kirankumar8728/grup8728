@@ -145,6 +145,14 @@ export async function submitGroupAction(input: SubmitGroupInput): Promise<Submit
     console.warn('[SubmitGroupAction] Live scrape notice:', scErr?.message);
   }
 
+  if (detectedPlatform === 'whatsapp' && fetchedMetadata?.isExpired) {
+    return {
+      success: false,
+      error: '❌ This WhatsApp group invite link is expired or inactive. Expired group links cannot be published.',
+      diagnosticStep: 'WHATSAPP_LINK_EXPIRED',
+    };
+  }
+
   // Required Debug Log: Before save
   console.log('Fetched metadata', fetchedMetadata);
 

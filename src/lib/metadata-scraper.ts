@@ -1107,24 +1107,6 @@ async function scrapeWhatsAppDirect(targetUrl: string): Promise<{
   }
 
   try {
-    const htmlLower = fetchRes.html.toLowerCase();
-    if (
-      htmlLower.includes('invite link is invalid') ||
-      htmlLower.includes('link is invalid') ||
-      htmlLower.includes('no longer available') ||
-      htmlLower.includes('group was reset') ||
-      htmlLower.includes('expired')
-    ) {
-      return {
-        title: 'Expired WhatsApp Group',
-        description: 'This WhatsApp group invite link has expired or is no longer active.',
-        imageUrl: '',
-        memberCount: 0,
-        isVerified: false,
-        isExpired: true,
-      };
-    }
-
     const root = parse(fetchRes.html);
     const rawMeta: Record<string, string> = {};
 
@@ -1161,29 +1143,39 @@ async function scrapeWhatsAppDirect(targetUrl: string): Promise<{
         }
     }
 
-    // Check if h3 title heading exists. If no h3 title is found, WhatsApp group invite link is expired.
-    const h3El = root.querySelector('h3') || root.querySelector('h3._9vd5') || root.querySelector('._9vd5');
-    const hasH3Title = h3El && h3El.text && !isGenericGroupTitle(h3El.text.trim()) && !h3El.text.toLowerCase().includes('whatsapp group invite');
+    // Try to get title from heading elements (h3, h1, h2) if still generic
+    const h3El = root.querySelector('h3') || root.querySelector('h1') || root.querySelector('h2') || root.querySelector('h3._9vd5') || root.querySelector('._9vd5');
+    if ((!title || isGenericGroupTitle(title) || title.toLowerCase().includes('whatsapp group invite')) && h3El && h3El.text) {
+      const hText = decodeHtmlEntitiesAndClean(h3El.text.trim());
+      if (!isGenericGroupTitle(hText) && !hText.toLowerCase().includes('whatsapp group invite')) {
+        title = hText;
+      }
+    }
 
-    if (!hasH3Title && (!title || isGenericGroupTitle(title))) {
+    // WhatsApp avatar filtering
+    if (imageUrl && (imageUrl.includes('whatsapp.com/img/') || imageUrl.includes('favicon') || imageUrl.includes('rsrc.php'))) {
+      imageUrl = '';
+    }
+    if (!imageUrl || isGenericGroupImage(imageUrl)) {
+      const ppsMatch = fetchRes.html.match(/https:\/\/(?:pps|mmg|scontent)\.whatsapp\.net\/[^\s"'>\\]+/i);
+      if (ppsMatch && ppsMatch[0]) {
+        imageUrl = ppsMatch[0].replace(/&amp;/g, '&');
+      }
+    }
+
+    // Check strictly if the group has both valid image and valid title when scraping
+    const hasValidTitle = Boolean(title && !isGenericGroupTitle(title) && !title.toLowerCase().includes('whatsapp group invite'));
+    const hasValidImage = Boolean(imageUrl && !isGenericGroupImage(imageUrl));
+
+    if (!hasValidTitle || !hasValidImage) {
       return {
-        title: 'Expired WhatsApp Group',
-        description: 'This WhatsApp group invite link has expired or is no longer active.',
+        title: title || 'Expired WhatsApp Group',
+        description: 'This WhatsApp group invite link has expired or is no longer active (missing active title or group avatar).',
         imageUrl: '',
         memberCount: 0,
         isVerified: false,
         isExpired: true,
       };
-    }
-
-    // Try to get title from heading elements if still generic
-    if (!title || isGenericGroupTitle(title) || title.toLowerCase().includes('whatsapp group invite')) {
-      if (h3El && h3El.text) {
-        const hText = decodeHtmlEntitiesAndClean(h3El.text.trim());
-        if (!isGenericGroupTitle(hText) && !hText.toLowerCase().includes('whatsapp group invite')) {
-          title = hText;
-        }
-      }
     }
 
     // WhatsApp avatar filtering
